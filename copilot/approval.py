@@ -39,6 +39,30 @@ class ApprovalQueue:
             payload["recall"] = p.recall
         self.audit.append(p.case_id, p.proposed_by, "proposed", payload)
 
+    def load(self, proposals: list[Proposal]) -> None:
+        """Rebuild queue state after a restart, from the audit log (the source of truth).
+        Cases already decided stay decided; proposed-but-undecided return to pending
+        without a duplicate 'proposed' event; new cases are submitted."""
+        last: dict[str, str] = {}
+        for e in self.audit.events():
+            last[e["case_id"]] = e["event"]
+        for p in proposals:
+            state = last.get(p.case_id)
+            if state in ("approved", "rejected"):
+                self._decided[p.case_id] = "approve" if state == "approved" else "reject"
+            elif state == "proposed":
+                self._pending[p.case_id] = p
+            else:
+                self.submit(p)
+
+    def status(self, case_id: str) -> str:
+        if case_id in self._pending:
+            return "pending"
+        return {"approve": "approved", "reject": "rejected"}.get(self._decided.get(case_id, ""), "unknown")
+
+    def get(self, case_id: str) -> Proposal | None:
+        return self._pending.get(case_id)
+
     def pending(self) -> list[Proposal]:
         return list(self._pending.values())
 
