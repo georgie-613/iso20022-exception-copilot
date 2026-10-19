@@ -1,0 +1,24 @@
+[project]
+name = "iso20022-exception-copilot"
+version = "0.1.0"
+description = "ISO 20022 MCP server + Exception Copilot. Synthetic data only."
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.7",
+    "lxml>=5.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["gen"]
