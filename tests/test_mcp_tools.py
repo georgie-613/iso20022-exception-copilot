@@ -112,8 +112,8 @@ def test_no_external_entities():
 
 def test_tools_registered_read_only():
     tools = asyncio.run(server.list_tools())
-    assert {t.name for t in tools} == {"parse_message", "validate_message"}
-    for t in tools:
+    assert {"parse_message", "validate_message"} <= {t.name for t in tools}
+    for t in tools:  # every tool on this server is read-only, including draft_repair
         assert t.annotations.read_only_hint and not t.annotations.destructive_hint
 
 

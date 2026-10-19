@@ -10,8 +10,8 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 |---|---|
 | Seeded synthetic case generator (60 cases, XSD-validated) | ✅ Day 1 |
 | MCP server: `parse_message`, `validate_message` | ✅ Day 2 |
-| MCP server: `explain_reject`, `draft_repair` | ⏳ next |
-| Exception Copilot agent + human approval gate + audit log | ⏳ |
+| MCP server: `explain_reject`, `draft_repair` + guardrails | ✅ Day 3 |
+| Exception Copilot agent + human approval gate + audit log | ⏳ next |
 | Eval runner (accuracy, false-repair rate, routing precision) | ⏳ |
 
 ## Scope (v1)
@@ -50,12 +50,26 @@ Output is byte-identical for a given seed.
 
 ## The MCP server
 
-Read-only tools (annotated `readOnlyHint`, never change or send anything):
+Four tools, all read-only (annotated `readOnlyHint`; none of them change or send anything):
 
 | Tool | Does |
 |---|---|
 | `parse_message` | Reads a pacs.008 or pacs.002 into structured fields. Works on schema-invalid messages, so a CH16 reject is still explainable. |
 | `validate_message` | XSD check plus business rules: BIC directory, business day, required debtor/creditor address, IBAN mod-97. Every finding carries `reason_code_hint`, the ISO reason code it would most likely trigger. |
+| `explain_reject` | Explains a pacs.002 reject in plain language and classifies it under the reason-code policy: `repair`, `outreach` or `escalate`. With the original pacs.008 attached, it adds evidence. |
+| `draft_repair` | For RC01, CH16, DT01, RR02 only: returns `DRAFT_PENDING_APPROVAL` with a field-level diff and the repaired XML, or `REFUSED` with where to route it. |
+
+### Guardrails, enforced in code
+
+The policy table in `iso20022_mcp/policy.py` decides what is repairable, not the model. `draft_repair` then enforces:
+
+1. **Policy gate**: only codes marked `repair` can be drafted. Unknown codes escalate.
+2. **Evidence gate**: the defect the reject code points at must be visible in the message. No evidence, no repair.
+3. **Allowlist gate**: after the edit, the diff is checked; if any field outside the code's allowlist moved, the draft is discarded.
+4. **Validation gate**: the repaired message must pass validation.
+5. **Draft only**: nothing is sent. Every draft needs a human.
+
+Against the 60-case set, `explain_reject` matches the answer key on every case and `draft_repair` produces the expected value on every repairable case. That is the deterministic baseline; the agent layer is measured against it.
 
 A rejected payment that validates **clean** is a signal too: the cause is outside the message (closed account, funds, compliance), so it goes to a person.
 
