@@ -7,7 +7,11 @@ license = { text = "MIT" }
 dependencies = [
     "pydantic>=2.7",
     "lxml>=5.2",
+    "mcp>=2.3,<3",
 ]
+
+[project.scripts]
+iso20022-mcp = "iso20022_mcp.server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
@@ -21,4 +25,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["gen"]
+packages = ["gen", "iso20022_mcp"]

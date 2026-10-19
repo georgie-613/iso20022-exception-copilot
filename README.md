@@ -9,8 +9,8 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 | Piece | State |
 |---|---|
 | Seeded synthetic case generator (60 cases, XSD-validated) | ✅ Day 1 |
-| MCP server: `parse_message`, `validate_message` | ⏳ next |
-| MCP server: `explain_reject`, `draft_repair` | ⏳ |
+| MCP server: `parse_message`, `validate_message` | ✅ Day 2 |
+| MCP server: `explain_reject`, `draft_repair` | ⏳ next |
 | Exception Copilot agent + human approval gate + audit log | ⏳ |
 | Eval runner (accuracy, false-repair rate, routing precision) | ⏳ |
 
@@ -47,6 +47,39 @@ Writes 60 cases: 50 for evaluation (40 Lane A, 10 Lane B, every code covered) an
 - `request.txt` — Lane B only: the client's recall request
 
 Output is byte-identical for a given seed.
+
+## The MCP server
+
+Read-only tools (annotated `readOnlyHint`, never change or send anything):
+
+| Tool | Does |
+|---|---|
+| `parse_message` | Reads a pacs.008 or pacs.002 into structured fields. Works on schema-invalid messages, so a CH16 reject is still explainable. |
+| `validate_message` | XSD check plus business rules: BIC directory, business day, required debtor/creditor address, IBAN mod-97. Every finding carries `reason_code_hint`, the ISO reason code it would most likely trigger. |
+
+A rejected payment that validates **clean** is a signal too: the cause is outside the message (closed account, funds, compliance), so it goes to a person.
+
+Run it over stdio:
+
+```
+python -m iso20022_mcp.server
+```
+
+Claude Desktop config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "iso20022": {
+      "command": "python",
+      "args": ["-m", "iso20022_mcp.server"],
+      "cwd": "/path/to/iso20022-exception-copilot"
+    }
+  }
+}
+```
+
+The BIC directory is the synthetic one from the generator, behind `iso20022_mcp/refdata.py`, the one adapter to swap for a real directory feed.
 
 ## Develop
 
