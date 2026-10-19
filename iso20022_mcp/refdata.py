@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from gen.customers import debtor_master as _debtor_master
 from gen.directory import Directory
 
 
@@ -19,3 +20,9 @@ def bic_directory() -> Directory:
 # Small allowlist of ISO 4217 codes this rail expects. Unknown codes are a
 # warning, not an error: the reject reason decides, not us.
 KNOWN_CURRENCIES = {"USD", "EUR", "GBP", "MXN", "BRL", "COP", "CLP", "PEN", "CRC", "ARS", "DOP", "PAB"}
+
+
+@lru_cache(maxsize=1)
+def debtor_master():
+    """Our own customers' KYC addresses (debtor side only). Swap for the core's customer master."""
+    return _debtor_master()
