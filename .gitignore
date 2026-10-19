@@ -5,3 +5,5 @@ __pycache__/
 .pytest_cache/
 # generated: python -m gen.build --seed 42
 cases/
+evals/report/
+audit*.jsonl

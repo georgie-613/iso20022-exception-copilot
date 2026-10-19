@@ -11,8 +11,10 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 | Seeded synthetic case generator (60 cases, XSD-validated) | ✅ Day 1 |
 | MCP server: `parse_message`, `validate_message` | ✅ Day 2 |
 | MCP server: `explain_reject`, `draft_repair` + guardrails | ✅ Day 3 |
-| Exception Copilot agent + human approval gate + audit log | ⏳ next |
-| Eval runner (accuracy, false-repair rate, routing precision) | ⏳ |
+| Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
+| Eval runner + CI gate | ✅ Day 4 |
+| LLM layer (recall classification, outreach wording) + approval UI | ⏳ next |
+| Held-out adversarial case set | ⏳ next |
 
 ## Scope (v1)
 
@@ -94,6 +96,33 @@ Claude Desktop config (`claude_desktop_config.json`):
 ```
 
 The BIC directory is the synthetic one from the generator, behind `iso20022_mcp/refdata.py`, the one adapter to swap for a real directory feed.
+
+## The copilot
+
+`copilot/agent.py` turns one case into one proposal for a human:
+
+- **Lane A rejects:** `explain_reject` → policy action → `draft_repair` (repair), a drafted client message (outreach), or escalate.
+- **Lane B recalls:** classify the client's free-text request → draft camt.056 fields, or escalate.
+
+The model's job is narrow: classify recall requests and word client messages. It never decides what is repairable and never edits a payment field. **Any fraud signal in a recall request escalates, whatever the model says**; a test plugs in a model that calls every request routine and checks fraud still reaches a person.
+
+`copilot/approval.py` is the gate: the copilot is the maker, a named human the checker, and the two can never be the same identity. A rejection needs a reason.
+
+`copilot/audit.py` is append-only and hash-chained: each event stores the previous event's hash, so editing or deleting any past line fails `verify()`. The `proposed` event pins the SHA-256 of the drafted XML, so what was approved is exactly what was proposed.
+
+## Evals
+
+```
+python -m evals.run --cases cases
+```
+
+| Metric | Gated in CI |
+|---|---|
+| False repairs (repair proposed where the label isn't, or wrong value) | **yes, must be 0** |
+| Zero-miss: RR04, MS03, FRAD always escalate | **yes, must be 0** |
+| Action accuracy, routing precision, recall-reason accuracy | reported only (1 case = 2 points; too noisy to gate) |
+
+The rules baseline scores 100% on the current set. **Read that as plumbing, not intelligence**: the generator and the rules were written together, so the set can't surprise them. The next step is a held-out set with paraphrased requests and edge cases the rules weren't written for; the LLM layer is measured there, against this baseline.
 
 ## Develop
 
