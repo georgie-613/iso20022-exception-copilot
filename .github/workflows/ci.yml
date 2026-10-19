@@ -17,3 +17,8 @@ jobs:
       - run: python -m pytest -q
       - name: Generate case set
         run: python -m gen.build --seed 42 --out cases
+      - name: Eval gate (false repairs = 0, zero-miss = 0)
+        run: python -m evals.run --cases cases --out evals/report
+      - name: Eval report to job summary
+        if: always()
+        run: cat evals/report/report.md >> "$GITHUB_STEP_SUMMARY" || true
