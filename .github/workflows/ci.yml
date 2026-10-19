@@ -22,3 +22,8 @@ jobs:
       - name: Eval report to job summary
         if: always()
         run: cat evals/report/report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Held-out set (report only; tracks known gaps)
+        run: |
+          python -m gen.holdout --seed 42 --out cases_holdout
+          python -m evals.run --cases cases_holdout --set holdout --report-only --out evals/report-holdout
+          cat evals/report-holdout/report.md >> "$GITHUB_STEP_SUMMARY"

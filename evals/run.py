@@ -29,14 +29,14 @@ ZERO_MISS = {"RR04", "MS03", "FRAD"}
 HUMAN = {"outreach", "escalate"}
 
 
-def evaluate(cases: Path, copilot: Copilot | None = None) -> dict:
+def evaluate(cases: Path, copilot: Copilot | None = None, set_: str = "eval") -> dict:
     copilot = copilot or Copilot()
     rows = []
     for d in sorted(cases.iterdir()):
         if not (d / "label.json").exists():
             continue
         label = Label.model_validate_json((d / "label.json").read_text())
-        if label.set != "eval":
+        if label.set != set_:
             continue
         p = copilot.triage(d)
         repair_ok = None
@@ -56,6 +56,7 @@ def evaluate(cases: Path, copilot: Copilot | None = None) -> dict:
     zm = [r for r in rows if r["code"] in ZERO_MISS]
     lane_b = [r for r in rows if r["lane"] == "B"]
     metrics = {
+        "set": set_,
         "cases": n,
         "model": copilot.model.name,
         "action_accuracy": sum(r["correct"] for r in rows) / n,
@@ -75,7 +76,7 @@ def to_markdown(result: dict) -> str:
     m = result["metrics"]
     pct = lambda x: "n/a" if x is None else f"{x:.0%}"  # noqa: E731
     lines = [
-        f"# Eval report ({m['model']})", "",
+        f"# Eval report: {m['set']} set ({m['model']})", "",
         "| Metric | Result | Target |", "|---|---|---|",
         f"| Action accuracy | {pct(m['action_accuracy'])} ({m['action_correct']}/{m['cases']}) | report only |",
         f"| False repairs | {m['false_repairs']} | 0 (gated) |",
@@ -94,13 +95,15 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cases", type=Path, default=Path("cases"))
     ap.add_argument("--out", type=Path, default=Path("evals/report"))
+    ap.add_argument("--set", dest="set_", default="eval", choices=["eval", "holdout"])
+    ap.add_argument("--report-only", action="store_true", help="never fail; for tracking known gaps")
     args = ap.parse_args()
-    result = evaluate(args.cases)
+    result = evaluate(args.cases, set_=args.set_)
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "report.json").write_text(json.dumps(result, indent=2) + "\n")
     (args.out / "report.md").write_text(to_markdown(result))
     print(to_markdown(result))
-    sys.exit(0 if result["metrics"]["gate_passed"] else 1)
+    sys.exit(0 if args.report_only or result["metrics"]["gate_passed"] else 1)
 
 
 if __name__ == "__main__":
