@@ -14,7 +14,7 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 | Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
 | Eval runner + CI gate | ✅ Day 4 |
 | LLM layer (recall classification, outreach wording) + approval UI | ⏳ next |
-| Held-out adversarial case set | ⏳ next |
+| Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
 
 ## Scope (v1)
 
@@ -122,7 +122,25 @@ python -m evals.run --cases cases
 | Zero-miss: RR04, MS03, FRAD always escalate | **yes, must be 0** |
 | Action accuracy, routing precision, recall-reason accuracy | reported only (1 case = 2 points; too noisy to gate) |
 
-The rules baseline scores 100% on the current set. **Read that as plumbing, not intelligence**: the generator and the rules were written together, so the set can't surprise them. The next step is a held-out set with paraphrased requests and edge cases the rules weren't written for; the LLM layer is measured there, against this baseline.
+The rules baseline scores 100% on the current set. **Read that as plumbing, not intelligence**: the generator and the rules were written together, so the set can't surprise them.
+
+### Held-out set
+
+```
+python -m gen.holdout --seed 42 --out cases_holdout
+python -m evals.run --cases cases_holdout --set holdout --report-only
+```
+
+18 cases written *against* the rules: recall requests with none of the baseline's keywords, Spanish and Portuguese requests from LATAM clients, fraud described without the word "fraud", and reject edge cases where the obvious repair is wrong.
+
+| Rules baseline on held-out | Result |
+|---|---|
+| Reject edge cases (bad BIC with no agent name, reject code with no visible defect, unknown debtor, CH16 on a client reference, unknown code) | **6/6 escalated**: the guardrails generalize |
+| False repairs | **0** |
+| Implicit fraud (BEC, lookalike domain, vendor callback, Portuguese) | **4 of 5 missed** |
+| Recall reason accuracy | 25% |
+
+The fraud misses are the known gap, tracked as a strict `xfail` test, and it is the model layer's job to close it. Even today a missed fraud case lands as a *recall draft awaiting human approval*, not an action; the zero-miss gate exists so the model can't ship until a person never has to catch it.
 
 ## Develop
 

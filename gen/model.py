@@ -71,7 +71,7 @@ class Label(BaseModel):
     """
 
     case_id: str
-    set: Literal["eval", "demo"]
+    set: Literal["eval", "demo", "holdout"]
     lane: Literal["A", "B"]
     code: str
     action: Action
