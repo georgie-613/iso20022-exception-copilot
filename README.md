@@ -13,7 +13,8 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 | MCP server: `explain_reject`, `draft_repair` + guardrails | ✅ Day 3 |
 | Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
 | Eval runner + CI gate | ✅ Day 4 |
-| LLM layer (recall classification, outreach wording) + approval UI | ⏳ next |
+| Approval screen (queue, diff, approve/reject, audit trail) | ✅ Day 6 |
+| LLM layer (recall classification, outreach wording) | ⏳ next: needs `ANTHROPIC_API_KEY` |
 | Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
 
 ## Scope (v1)
@@ -109,6 +110,21 @@ The model's job is narrow: classify recall requests and word client messages. It
 `copilot/approval.py` is the gate: the copilot is the maker, a named human the checker, and the two can never be the same identity. A rejection needs a reason.
 
 `copilot/audit.py` is append-only and hash-chained: each event stores the previous event's hash, so editing or deleting any past line fails `verify()`. The `proposed` event pins the SHA-256 of the drafted XML, so what was approved is exactly what was proposed.
+
+## Approval screen
+
+```
+pip install -e ".[ui]"
+python -m gen.build --seed 42
+uvicorn ui.app:create_app --factory      # http://127.0.0.1:8000
+```
+
+- **Queue:** every demo case with the copilot's proposal and its status.
+- **Case page:** the field-level before/after diff for repairs, the drafted client message for outreach, the camt.056 fields for recalls, the evidence, and the case's audit trail with hashes.
+- **Decision:** reviewer name plus approve or reject. The copilot's identity is refused (maker-checker), a rejection needs a note, and every decision is written to the hash-chained log.
+- **Restart-safe:** queue state is rebuilt from the audit log, so decisions persist and proposals aren't logged twice.
+
+No login in v1: the reviewer types their name. A real deployment puts SSO in front and takes the identity from it.
 
 ## Evals
 
