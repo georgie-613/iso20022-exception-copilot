@@ -207,6 +207,8 @@ That is why routing precision drops to 85%: over-escalation costs analyst minute
 
 **Golden set (50):** identical to the baseline on every metric (100% action accuracy, 0 false repairs, 0 zero-miss), **but the run is marked failed** because of one fallback. On A-AC04-02 the outreach fact check rejected the model's message ("asks for credentials") and the rules template went out instead. The control did its job. That run predates the gate split below; under the current gate a guardrail block is reported, not failed.
 
+**Run 2** ([report](evals/results/live-eval-2026-10-20-run-39358916870.md)) found two bugs of mine, both fixed in the following PR: the outreach credential check blocked three *good* messages because they warned clients **not** to share passwords (the check now blocks requests, not warnings), and one held-out classification was cut off mid-JSON because the 512-token budget is shared with the model's thinking (raised to 4096). Held-out fraud stayed at 0 of 5 missed.
+
 The strict `xfail` stays: it asserts the *rules baseline* catches implicit fraud, and the rules still don't. The gap is closed by the model layer, measured here, not by the rules.
 
 The held-out set is not used to tune prompts; if a prompt changes after seeing it, a held-out v2 is written and reported instead.

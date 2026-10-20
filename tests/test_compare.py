@@ -90,7 +90,7 @@ def test_guardrail_rejection_is_reported_not_failed(tmp_path):
 
     def write(kw):
         if "end_to_end_id" in kw["messages"][0]["content"]:
-            return OutreachDraft(message="We will never ask for your password.", confidence=0.9)
+            return OutreachDraft(message="To confirm, reply with your online banking password.", confidence=0.9)
         raise AssertionError("unexpected call")
 
     def classify(kw):
@@ -104,7 +104,7 @@ def test_guardrail_rejection_is_reported_not_failed(tmp_path):
     assert m["model_api_failures"] == 0 and m["model_outputs_rejected"] > 0
     md = compare(evaluate(cases, make_copilot("rules")), after)
     assert "## Outputs blocked by guardrails" in md
-    assert "We will never ask for your password." in md
+    assert "reply with your online banking password." in md
     assert "no failed model calls): PASSED" in md
 
 
