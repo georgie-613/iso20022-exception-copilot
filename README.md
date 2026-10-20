@@ -2,23 +2,9 @@
 
 An open-source ISO 20022 MCP server and an exception-triage copilot for rejected and recalled cross-border payments. The copilot drafts a fix, a client message or a recall; a human approves every action; every step is logged.
 
-```mermaid
-flowchart LR
-    case["Rejected or settled payment<br/>pacs.008 + pacs.002<br/>(+ client recall request)"] --> mcp
-    subgraph mcp["MCP server (read-only)"]
-        direction TB
-        t1["parse_message"] --- t2["validate_message"] --- t3["explain_reject"] --- t4["draft_repair"]
-    end
-    policy["Policy table<br/>decides what is repairable"] --> mcp
-    mcp --> copilot["Copilot"]
-    copilot -- "classify recall request<br/>word client message" --> claude["Claude<br/>schema-constrained output"]
-    claude --> guard["Guardrails in code<br/>fraud override · confidence floor<br/>fact check · rules fallback"]
-    guard --> copilot
-    copilot --> proposal["Proposal<br/>repair · outreach · recall · escalate"]
-    proposal --> human["Approval screen<br/>named human, maker-checker"]
-    copilot --> audit[("Hash-chained audit log")]
-    human --> audit
-```
+![Architecture: payment case to read-only MCP tools, copilot, Claude behind guardrails, proposal, human approval, hash-chained audit log](docs/architecture.png)
+
+<sub>Diagram source: [`docs/architecture.mmd`](docs/architecture.mmd)</sub>
 
 **What this proves.** You can put an LLM into a payments operations workflow without letting it touch money. The model never decides what is repairable and never edits a payment field: a policy table decides, the model only classifies client recall requests and words client messages, its output passes checks enforced in code, a named human approves every action, and a tamper-evident log records all of it. On 18 held-out cases written to break the keyword rules, Claude cut missed fraud from **4 of 5 to 0 of 5** with **zero false repairs**, and the two cases it got wrong went to a person, not out the door. The evals, misses and my own bugs included, are [published as-is](#before--after-rules-vs-model).
 
