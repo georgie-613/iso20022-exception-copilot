@@ -76,6 +76,13 @@ def compare(before: dict, after: dict) -> str:
                 f"{(o.get('rationale') or r.get('model_note') or '').replace('|', '/')} |")
         lines.append("")
 
+    fb = [r for r in after["rows"] if r.get("fallback_errors")]
+    if fb:
+        lines += ["## Fallbacks: why the model's answer wasn't used", "",
+                  "| Case | Reason |", "|---|---|"]
+        lines += [f"| {r['case_id']} | {'; '.join(r['fallback_errors']).replace('|', '/')[:300]} |" for r in fb]
+        lines.append("")
+
     b_by_id = {r["case_id"]: r for r in before["rows"]}
     lane_b = [r for r in after["rows"] if r["lane"] == "B"]
     if lane_b:

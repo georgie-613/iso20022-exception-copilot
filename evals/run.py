@@ -68,6 +68,7 @@ def evaluate(cases: Path, copilot: Copilot | None = None, set_: str = "eval") ->
             "reason_proposed": p.reason_code,
             "model_note": p.model_note,
             "fell_back": any(c["fallback"] for c in calls),
+            "fallback_errors": [f'{c["kind"]}: {c["error"]}' for c in calls if c["fallback"]],
             "model_output": calls[-1]["output"] if calls else None,
             "latency_ms": sum(c["latency_ms"] for c in calls) if calls else None,
         })

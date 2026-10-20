@@ -77,3 +77,5 @@ def test_fallbacks_are_counted_and_fail_the_run(holdout, tmp_path):
     assert after["metrics"]["model_calls_fell_back"] == 12      # every Lane B call
     md = compare(evaluate(holdout, make_copilot("rules"), set_="holdout"), after)
     assert "FAILED" in md   # a run that fell back is not a model result
+    assert "## Fallbacks: why the model's answer wasn't used" in md
+    assert "classify_recall: ConnectionError: network down" in md
