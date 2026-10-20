@@ -180,6 +180,16 @@ python -m evals.run --cases cases_holdout --set holdout --report-only
 | Implicit fraud (BEC, lookalike domain, vendor callback, Portuguese) | **4 of 5 missed** |
 | Recall reason accuracy | 25% |
 
+### Before / after: rules vs model
+
+```
+python -m evals.compare --cases cases_holdout --set holdout   # needs ANTHROPIC_API_KEY
+```
+
+Runs both on the same cases and writes a side-by-side table plus a failure analysis of every model miss, with the model's own rationale and fraud indicators. It exits non-zero if the model run breaks a hard gate or quietly fell back to rules, because a fallback run is not a model result. In GitHub: **Actions → live-eval → Run workflow** (uses the `ANTHROPIC_API_KEY` repo secret; regular CI never calls the API).
+
+**Live results: pending first run.** They will be published here as-is, misses included. The held-out set is not used to tune prompts; if a prompt changes after seeing it, a held-out v2 is written and reported instead.
+
 The fraud misses are the known gap, tracked as a strict `xfail` test, and it is the model layer's job to close it. Even today a missed fraud case lands as a *recall draft awaiting human approval*, not an action; the zero-miss gate exists so the model can't ship until a person never has to catch it.
 
 ## Develop
