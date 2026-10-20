@@ -14,7 +14,7 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 | Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
 | Eval runner + CI gate | ✅ Day 4 |
 | Approval screen (queue, diff, approve/reject, audit trail) | ✅ Day 6 |
-| LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 · live: implicit fraud missed 4/5 → 0/5 |
+| LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 · live: implicit fraud missed 4/5 → 0/5, all gates green |
 | Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
 
 ## Scope (v1)
@@ -188,7 +188,7 @@ python -m evals.compare --cases cases_holdout --set holdout   # needs ANTHROPIC_
 
 Runs both on the same cases and writes a side-by-side table plus a failure analysis of every model miss, with the model's own rationale and fraud indicators. It exits non-zero if the model run breaks a hard gate (false repairs, zero-miss) or if model calls **failed** (API error, refusal), because then the numbers are really the rules baseline's. A model output **blocked by a guardrail** is different: the control worked, so it is reported, with the blocked text, but doesn't fail the run. In GitHub: **Actions → live-eval → Run workflow** (uses the `ANTHROPIC_API_KEY` repo secret; regular CI never calls the API).
 
-**Live results** (`claude-sonnet-5-5`, 2026-10-20, [full report](evals/results/live-eval-2026-10-20-run-39357904969.md), published as-is):
+**Live results** (`claude-sonnet-5-5`, run 3 on 2026-10-20, [full report](evals/results/live-eval-2026-10-20-run-39360520595.md), published as-is). **All hard gates pass on both sets, with no failed model calls and no outputs blocked by guardrails.**
 
 | Held-out set (18 cases the rules never saw) | Rules baseline | Claude |
 |---|---|---|
@@ -197,17 +197,20 @@ Runs both on the same cases and writes a side-by-side table plus a failure analy
 | Recall reason accuracy | 25% | 83% |
 | Action accuracy | 78% | 89% |
 | Routing precision | 100% | 85% |
+| Failed model calls / outputs blocked | – | 0 / 0 |
 | Hard gates (false repairs = 0, zero-miss = 0, no failed model calls) | failed | **passed** |
 
-**What the model got wrong (2 of 18)**, both in the safe direction: two technical-error recalls were escalated to a person instead of drafted.
+**Golden set (50):** identical to the baseline on every metric (100% action and reason accuracy, 0 false repairs, 0 zero-miss), with 0 failed calls and 0 blocked outputs.
+
+**What the model got wrong (2 of 18)**, both in the safe direction: two technical-error recalls went to a person instead of getting a drafted recall. The same two cases, with the same reasons and confidence, came up in runs 1 and 3.
 - *H-B-TECH-GLITCH*: "released before it was approved internally". The model read an unapproved release as possibly unauthorized and chose FRAD (confidence 0.6). The prompt says "when in doubt, choose FRAD", and it did.
 - *H-B-TECH-H2H*: a host-to-host resend after a timeout. Classed DUPL at 0.6 confidence, below the 0.7 floor, so it went to a person.
 
 That is why routing precision drops to 85%: over-escalation costs analyst minutes, a missed fraud costs the money. The prompt was **not** changed after seeing these results; any change gets a held-out v2.
 
-**Golden set (50):** identical to the baseline on every metric (100% action accuracy, 0 false repairs, 0 zero-miss), **but the run is marked failed** because of one fallback. On A-AC04-02 the outreach fact check rejected the model's message ("asks for credentials") and the rules template went out instead. The control did its job. That run predates the gate split below; under the current gate a guardrail block is reported, not failed.
-
-**Run 2** ([report](evals/results/live-eval-2026-10-20-run-39358916870.md)) found two bugs of mine, both fixed in the following PR: the outreach credential check blocked three *good* messages because they warned clients **not** to share passwords (the check now blocks requests, not warnings), and one held-out classification was cut off mid-JSON because the 512-token budget is shared with the model's thinking (raised to 4096). Held-out fraud stayed at 0 of 5 missed.
+**How we got here (earlier runs kept as-is):**
+- Run 1 ([report](evals/results/live-eval-2026-10-20-run-39357904969.md)): same held-out numbers. Golden was marked failed because the outreach check rejected one model message; under the old gate any fallback failed the run. The gate now fails only on API failures; a guardrail block is reported, with the blocked text.
+- Run 2 ([report](evals/results/live-eval-2026-10-20-run-39358916870.md)) found two bugs of mine. The credential check blocked three *good* messages that warned clients **not** to share passwords; it now blocks requests and lets warnings through. And one held-out classification was cut off mid-JSON because the 512-token budget is shared with the model's thinking; it is now 4096. Run 3 is the first run after both fixes.
 
 The strict `xfail` stays: it asserts the *rules baseline* catches implicit fraud, and the rules still don't. The gap is closed by the model layer, measured here, not by the rules.
 
