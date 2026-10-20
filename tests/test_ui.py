@@ -24,7 +24,7 @@ def test_queue_lists_demo_cases(client):
     c, _ = client
     r = c.get("/")
     assert r.status_code == 200
-    assert "DEMO-01-RC01" in r.text and "10 awaiting review" in r.text
+    assert "DEMO-01-RC01" in r.text and "11 awaiting review" in r.text
     assert "verified" in r.text
 
 
@@ -73,9 +73,9 @@ def test_decisions_survive_restart(cases, tmp_path):
     app2 = create_app(cases, "demo", log)
     c2 = TestClient(app2)
     assert "Decision recorded: approved" in c2.get("/case/DEMO-04-DT01").text
-    assert "9 awaiting review" in c2.get("/").text
+    assert "10 awaiting review" in c2.get("/").text
     proposed = [e for e in app2.state.audit.events() if e["event"] == "proposed"]
-    assert len(proposed) == 10  # restart did not re-log proposals
+    assert len(proposed) == 11  # restart did not re-log proposals
 
 
 def test_output_is_escaped(cases, tmp_path):

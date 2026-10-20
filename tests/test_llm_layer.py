@@ -262,3 +262,15 @@ def test_credential_warnings_are_allowed(msg):
 ])
 def test_credential_requests_are_blocked(msg):
     assert asks_for_credentials(msg)
+
+
+# ---------- the demo story ----------
+
+def test_demo_implicit_fraud_rules_miss_model_escalates(cases, audit):
+    """The 3-minute demo's third case: the keyword rules draft a recall (the gap),
+    a model that recognises impersonation escalates it."""
+    assert Copilot().triage(cases / "DEMO-11-FRAD").action == "recall"
+    m = fake_claude(lambda kw: recall("FRAD", conf=0.9, indicators=["CEO impersonation by text message"]))
+    p = Copilot(model=m, audit=audit).triage(cases / "DEMO-11-FRAD")
+    assert p.action == "escalate" and p.recall is None
+    assert "CEO impersonation" in p.summary
