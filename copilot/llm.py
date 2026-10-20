@@ -20,6 +20,10 @@ from pydantic import BaseModel, Field
 
 DEFAULT_MODEL = "claude-sonnet-5-5"
 
+# Thinking tokens share the max_tokens budget with the answer. 512 truncated one
+# live classification mid-JSON (run 39358916870); give ample room, cost is trivial.
+MAX_TOKENS = 4096
+
 
 class RecallClassification(BaseModel):
     reason: Literal["DUPL", "CUST", "TECH", "FRAD"] = Field(
@@ -72,7 +76,7 @@ class ClaudeModel:
     def classify_recall(self, request_text: str) -> tuple[RecallClassification, str]:
         prompt = f"<client_request>\n{request_text.strip()}\n</client_request>"
         r = self._client.messages.parse(
-            model=self.name, max_tokens=512, system=CLASSIFY_SYSTEM,
+            model=self.name, max_tokens=MAX_TOKENS, system=CLASSIFY_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
             output_format=RecallClassification,
         )
@@ -82,7 +86,7 @@ class ClaudeModel:
         facts = "\n".join(f"{k}: {v}" for k, v in ctx.items())
         prompt = f"Facts:\n{facts}\n\nWrite the message."
         r = self._client.messages.parse(
-            model=self.name, max_tokens=600, system=OUTREACH_SYSTEM,
+            model=self.name, max_tokens=MAX_TOKENS, system=OUTREACH_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
             output_format=OutreachDraft,
         )

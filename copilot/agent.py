@@ -113,6 +113,22 @@ class ModelCheckFailed(Exception):
     pass
 
 
+_CREDENTIAL = re.compile(r"password|passcode|\bPIN\b|one-time code|security code", re.I)
+_NEGATION = re.compile(r"\b(never|not|don't|won't|no one)\b", re.I)
+
+
+def asks_for_credentials(message: str) -> bool:
+    """True if any sentence asks for a credential. A warning like "please do not share any
+    passwords" mentions one without asking for it: a negation *before* the credential word
+    in the same sentence makes it a warning. (Live run 39358916870 blocked three good
+    messages on the bare word; see evals/results.)"""
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", message):
+        m = _CREDENTIAL.search(sentence)
+        if m and not _NEGATION.search(sentence[: m.start()]):
+            return True
+    return False
+
+
 def check_outreach(message: str, ctx: dict[str, Any]) -> None:
     """The model may word the message; it may not change or add facts."""
     if ctx["end_to_end_id"] not in message:
@@ -123,7 +139,7 @@ def check_outreach(message: str, ctx: dict[str, Any]) -> None:
     for num in re.findall(r"\d{6,}", message):
         if num not in allowed:
             raise ModelCheckFailed(f"introduced a number not in the facts: {num}")
-    if re.search(r"password|passcode|\bPIN\b|one-time code", message, re.I):
+    if asks_for_credentials(message):
         raise ModelCheckFailed("asks for credentials")
 
 
