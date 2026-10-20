@@ -1,6 +1,44 @@
 # ISO 20022 Exception Copilot
 
-An open-source ISO 20022 MCP server and an exception-triage copilot for rejected cross-border payments. The copilot drafts a fix or a recall, a human approves every action, and every step is logged.
+An open-source ISO 20022 MCP server and an exception-triage copilot for rejected and recalled cross-border payments. The copilot drafts a fix, a client message or a recall; a human approves every action; every step is logged.
+
+```mermaid
+flowchart LR
+    case["Rejected or settled payment<br/>pacs.008 + pacs.002<br/>(+ client recall request)"] --> mcp
+    subgraph mcp["MCP server (read-only)"]
+        direction TB
+        t1["parse_message"] --- t2["validate_message"] --- t3["explain_reject"] --- t4["draft_repair"]
+    end
+    policy["Policy table<br/>decides what is repairable"] --> mcp
+    mcp --> copilot["Copilot"]
+    copilot -- "classify recall request<br/>word client message" --> claude["Claude<br/>schema-constrained output"]
+    claude --> guard["Guardrails in code<br/>fraud override · confidence floor<br/>fact check · rules fallback"]
+    guard --> copilot
+    copilot --> proposal["Proposal<br/>repair · outreach · recall · escalate"]
+    proposal --> human["Approval screen<br/>named human, maker-checker"]
+    copilot --> audit[("Hash-chained audit log")]
+    human --> audit
+```
+
+**What this proves.** You can put an LLM into a payments operations workflow without letting it touch money. The model never decides what is repairable and never edits a payment field: a policy table decides, the model only classifies client recall requests and words client messages, its output passes checks enforced in code, a named human approves every action, and a tamper-evident log records all of it. On 18 held-out cases written to break the keyword rules, Claude cut missed fraud from **4 of 5 to 0 of 5** with **zero false repairs**, and the two cases it got wrong went to a person, not out the door. The evals, misses and my own bugs included, are [published as-is](#before--after-rules-vs-model).
+
+## Quickstart
+
+```
+pip install -e ".[ui]"                    # Python 3.12+
+python -m gen.build --seed 42             # 61 synthetic cases
+uvicorn ui.app:create_app --factory       # open http://127.0.0.1:8000
+```
+
+Set `ANTHROPIC_API_KEY` first to run Claude; without it the deterministic rules baseline runs and the app says so (`model: rules-baseline` in the queue header).
+
+### The 3-minute demo
+
+| Case | What happens | What to show |
+|---|---|---|
+| `DEMO-01-RC01` | Creditor agent BIC is wrong; the right one is in the bank's directory | One-field before/after diff, the validated repaired XML, approve it, the audit entry with its hash |
+| `DEMO-05-AC01` | Account number rejected | The copilot does **not** guess a number: it drafts a client message. Try approving as `copilot`: refused (maker-checker) |
+| `DEMO-11-FRAD` | Client asks to recall a payment their controller sent on a text from the CEO's "new mobile number". No fraud keywords | With Claude: escalated to a person with the fraud indicator, no recall drafted. With the rules baseline: a recall is drafted, the gap the model closes |
 
 **Synthetic data only.** No real bank messages, templates, BICs or customer data. Every BIC uses a test-BIC location code (second character `0`), so none can be a live production BIC.
 
@@ -8,12 +46,13 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 
 | Piece | State |
 |---|---|
-| Seeded synthetic case generator (60 cases, XSD-validated) | ✅ Day 1 |
+| Seeded synthetic case generator (61 cases, XSD-validated) | ✅ Day 1 |
 | MCP server: `parse_message`, `validate_message` | ✅ Day 2 |
 | MCP server: `explain_reject`, `draft_repair` + guardrails | ✅ Day 3 |
 | Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
 | Eval runner + CI gate | ✅ Day 4 |
 | Approval screen (queue, diff, approve/reject, audit trail) | ✅ Day 6 |
+| Demo polish: diagram, quickstart, 3-case demo story | ✅ PR 9 |
 | LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 · live: implicit fraud missed 4/5 → 0/5, all gates green |
 | Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
 
@@ -42,7 +81,7 @@ AC01 is deliberately `outreach` even when a digit transposition looks obvious: g
 python -m gen.build --seed 42 --out cases
 ```
 
-Writes 60 cases: 50 for evaluation (40 Lane A, 10 Lane B, every code covered) and 10 demo cases that are never scored. Each case folder has:
+Writes 61 cases: 50 for evaluation (40 Lane A, 10 Lane B, every code covered) and 11 demo cases that are never scored. Each case folder has:
 
 - `pacs008.xml` — the original payment (passes the XSD, except CH16 cases by design)
 - `pacs002.xml` — the status report (`RJCT` + reason code, or `ACSC` for recalls)
@@ -72,7 +111,7 @@ The policy table in `iso20022_mcp/policy.py` decides what is repairable, not the
 4. **Validation gate**: the repaired message must pass validation.
 5. **Draft only**: nothing is sent. Every draft needs a human.
 
-Against the 60-case set, `explain_reject` matches the answer key on every case and `draft_repair` produces the expected value on every repairable case. That is the deterministic baseline; the agent layer is measured against it.
+Against the 61-case set, `explain_reject` matches the answer key on every case and `draft_repair` produces the expected value on every repairable case. That is the deterministic baseline; the agent layer is measured against it.
 
 A rejected payment that validates **clean** is a signal too: the cause is outside the message (closed account, funds, compliance), so it goes to a person.
 

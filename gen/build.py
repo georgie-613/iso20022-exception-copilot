@@ -27,11 +27,15 @@ EVAL_PLAN: list[tuple[str, str, int]] = (
     [("A", c, 2 if c in ("AC06", "AG01") else 3) for c in LANE_A]
     + [("B", "DUPL", 3), ("B", "CUST", 3), ("B", "TECH", 2), ("B", "FRAD", 2)]
 )
-# Demo set: 10 cases for walkthroughs, never scored
+# Demo set: 11 cases for walkthroughs, never scored. The 3-minute story uses
+# DEMO-01-RC01 (repair), DEMO-05-AC01 (outreach) and DEMO-11-FRAD (implicit
+# fraud, written without the rules' keywords; see recall.IMPLICIT_FRAD).
 DEMO_PLAN: list[tuple[str, str]] = [
     ("A", "RC01"), ("A", "CH16"), ("A", "RR02"), ("A", "DT01"), ("A", "AC01"),
     ("A", "RR03"), ("A", "RR04"), ("A", "MS03"), ("B", "DUPL"), ("B", "FRAD"),
+    ("B", "FRAD"),
 ]
+IMPLICIT_DEMO = {"DEMO-11-FRAD"}
 
 
 def plan() -> list[tuple[str, str, str, str]]:
@@ -61,7 +65,7 @@ def build_case(seed: int, case_id: str, set_: str, lane: str, code: str,
     else:
         pacs008 = to_xml(payment)
         pacs002 = to_pacs002(payment, rng, "ACSC")
-        text, action, rationale = recall_request(code, payment, rng)
+        text, action, rationale = recall_request(code, payment, rng, implicit=case_id in IMPLICIT_DEMO)
         files["request.txt"] = (text + "\n").encode()
         label = Label(case_id=case_id, set=set_, lane="B", code=code, action=action,
                       rationale=rationale)

@@ -41,7 +41,22 @@ _RATIONALE = {
 
 LANE_B_CODES = tuple(_REQUESTS)
 
+# Demo only, never scored: fraud described without any of the rules' keywords
+# (CEO impersonation over text message). The keyword rules draft a recall for
+# it; the model layer has to recognise it and escalate. Deliberately unlike
+# every held-out template, so the demo leaks nothing into the held-out set.
+IMPLICIT_FRAD = (
+    "Please recall {e2e} for {ccy} {amt}. Our controller paid it on a text message from our "
+    "CEO's new mobile number while he was travelling. He says he sent no such message."
+)
 
-def recall_request(code: str, p: Payment, rng: random.Random) -> tuple[str, Action, str]:
+
+def recall_request(code: str, p: Payment, rng: random.Random,
+                   implicit: bool = False) -> tuple[str, Action, str]:
+    if implicit:
+        if code != "FRAD":
+            raise ValueError("implicit requests exist only for FRAD")
+        text = IMPLICIT_FRAD.format(e2e=p.end_to_end_id, ccy=p.currency, amt=p.amount)
+        return text, "escalate", "Implicit fraud (impersonation, no fraud keywords): model must escalate."
     text = rng.choice(_REQUESTS[code]).format(e2e=p.end_to_end_id, ccy=p.currency, amt=p.amount)
     return text, _ACTION[code], _RATIONALE[code]

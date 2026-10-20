@@ -32,13 +32,13 @@ def _labels(cases: Path) -> list[Label]:
             for d in sorted(cases.iterdir()) if d.is_dir()]
 
 
-def test_sixty_cases(cases):
+def test_case_counts(cases):
     labels = _labels(cases)
-    assert len(labels) == 60
+    assert len(labels) == 61
     assert sum(l.set == "eval" for l in labels) == 50
     assert sum(l.set == "eval" and l.lane == "A" for l in labels) == 40
     assert sum(l.set == "eval" and l.lane == "B" for l in labels) == 10
-    assert sum(l.set == "demo" for l in labels) == 10
+    assert sum(l.set == "demo" for l in labels) == 11
 
 
 def test_all_18_codes_present_in_eval(cases):
@@ -139,4 +139,17 @@ def test_valid_ibans_except_ac01(cases):
 
 def test_manifest(cases):
     m = json.loads((cases / "manifest.json").read_text())
-    assert m["seed"] == 42 and m["count"] == 60
+    assert m["seed"] == 42 and m["count"] == 61
+
+
+def test_implicit_fraud_demo_case(cases):
+    """DEMO-11 is the demo's model story: fraud with none of the rules' keywords."""
+    from copilot.agent import FRAUD_SIGNALS
+    from gen.holdout import RECALLS
+    d = cases / "DEMO-11-FRAD"
+    text = (d / "request.txt").read_text()
+    label = Label.model_validate_json((d / "label.json").read_text())
+    assert label.set == "demo" and label.code == "FRAD" and label.action == "escalate"
+    assert not FRAUD_SIGNALS.search(text)
+    # not a copy of any held-out request
+    assert all(t.split("{e2e}")[0][:25] not in text for _, _, _, t in RECALLS)
