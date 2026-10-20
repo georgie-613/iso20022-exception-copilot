@@ -13,7 +13,7 @@ from typing import Literal
 from .agent import Proposal
 from .audit import AuditLog
 
-AI_ACTORS = {"copilot"}
+AI_ACTORS = {"copilot", "copilot-model"}
 
 
 class ApprovalError(Exception):
@@ -37,7 +37,24 @@ class ApprovalQueue:
             payload["draft_sha256"] = hashlib.sha256(p.repair["repaired_xml"].encode()).hexdigest()
         if p.recall:
             payload["recall"] = p.recall
+        # The full proposal is pinned in the log: after a restart the reviewer sees exactly
+        # what was proposed, never a regenerated (possibly different) model output.
+        payload["proposal"] = p.model_dump()
         self.audit.append(p.case_id, p.proposed_by, "proposed", payload)
+
+    def restore(self) -> dict[str, Proposal]:
+        """Rebuild queue state from the audit log alone. Returns every logged proposal;
+        undecided ones go back to pending, decided ones stay decided."""
+        proposals: dict[str, Proposal] = {}
+        for e in self.audit.events():
+            cid = e["case_id"]
+            if e["event"] == "proposed" and "proposal" in e["payload"]:
+                proposals[cid] = Proposal.model_validate(e["payload"]["proposal"])
+                self._pending[cid] = proposals[cid]
+            elif e["event"] in ("approved", "rejected"):
+                self._pending.pop(cid, None)
+                self._decided[cid] = "approve" if e["event"] == "approved" else "reject"
+        return proposals
 
     def load(self, proposals: list[Proposal]) -> None:
         """Rebuild queue state after a restart, from the audit log (the source of truth).

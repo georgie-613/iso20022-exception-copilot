@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from copilot.agent import Copilot, RulesBaseline
+from copilot.llm import RecallClassification
 from copilot.approval import ApprovalError, ApprovalQueue
 from copilot.audit import AuditLog
 from evals.run import evaluate, to_markdown
@@ -54,8 +55,9 @@ class _GullibleModel(RulesBaseline):
     """A model that misreads a fraud report as a routine cancellation."""
     name = "gullible"
 
-    def classify_recall(self, request_text: str) -> str:
-        return "CUST"
+    def classify_recall(self, request_text: str):
+        return RecallClassification(reason="CUST", fraud_indicators=[], confidence=0.99,
+                                    rationale="looks routine"), "prompt"
 
 
 @pytest.mark.parametrize("text", [
@@ -144,8 +146,9 @@ def test_eval_gate_passes_on_baseline(cases):
 class _ReckessModel(RulesBaseline):
     name = "reckless"
 
-    def classify_recall(self, request_text: str) -> str:
-        return "DUPL"
+    def classify_recall(self, request_text: str):
+        return RecallClassification(reason="DUPL", fraud_indicators=[], confidence=0.99,
+                                    rationale="everything is a duplicate"), "prompt"
 
 
 def test_eval_gate_stays_up_with_bad_model(cases):

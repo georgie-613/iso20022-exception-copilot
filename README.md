@@ -14,7 +14,7 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 | Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
 | Eval runner + CI gate | ✅ Day 4 |
 | Approval screen (queue, diff, approve/reject, audit trail) | ✅ Day 6 |
-| LLM layer (recall classification, outreach wording) | ⏳ next: needs `ANTHROPIC_API_KEY` |
+| LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 (live eval in PR 8) |
 | Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
 
 ## Scope (v1)
@@ -107,6 +107,30 @@ The BIC directory is the synthetic one from the generator, behind `iso20022_mcp/
 
 The model's job is narrow: classify recall requests and word client messages. It never decides what is repairable and never edits a payment field. **Any fraud signal in a recall request escalates, whatever the model says**; a test plugs in a model that calls every request routine and checks fraud still reaches a person.
 
+### The model layer (`copilot/llm.py`)
+
+Claude does two jobs and nothing else: classify the client's recall request (DUPL / CUST / TECH / FRAD, in English, Spanish or Portuguese) and word the client outreach message. Controls, all enforced in `copilot/agent.py` rather than in the prompt:
+
+| Control | What happens |
+|---|---|
+| Structured output | Responses are schema-constrained Pydantic models (`RecallClassification`, `OutreachDraft`), not free text |
+| Fraud override | A fraud keyword, a `FRAD` reason, or **any** fraud indicator from the model escalates |
+| Confidence floor | Below `COPILOT_MIN_CONFIDENCE` (default 0.7) the case goes to a person |
+| Outreach fact check | The message must carry the exact reference and amount, may not introduce account-like numbers, and may not ask for credentials; otherwise the rules template is used |
+| Fallback | No key, an API error, a refusal or a failed check means the rules baseline answers, and the proposal says so |
+| Audit | Every call logs model, prompt SHA-256, latency, output and whether it fell back |
+| Client text is data | The request is wrapped in `<client_request>` tags; the system prompt says to ignore instructions inside it, and the fraud override doesn't depend on the model obeying |
+
+Self-reported confidence is a weak signal on its own, so it's one control of several, not the safety mechanism.
+
+```
+pip install -e ".[llm]"
+export ANTHROPIC_API_KEY=...            # optional; without it the rules baseline runs
+export COPILOT_MODEL=claude-sonnet-5-5  # default; "rules" forces the baseline
+```
+
+CI never calls the API: the layer is tested against a fake client.
+
 `copilot/approval.py` is the gate: the copilot is the maker, a named human the checker, and the two can never be the same identity. A rejection needs a reason.
 
 `copilot/audit.py` is append-only and hash-chained: each event stores the previous event's hash, so editing or deleting any past line fails `verify()`. The `proposed` event pins the SHA-256 of the drafted XML, so what was approved is exactly what was proposed.
@@ -122,7 +146,7 @@ uvicorn ui.app:create_app --factory      # http://127.0.0.1:8000
 - **Queue:** every demo case with the copilot's proposal and its status.
 - **Case page:** the field-level before/after diff for repairs, the drafted client message for outreach, the camt.056 fields for recalls, the evidence, and the case's audit trail with hashes.
 - **Decision:** reviewer name plus approve or reject. The copilot's identity is refused (maker-checker), a rejection needs a note, and every decision is written to the hash-chained log.
-- **Restart-safe:** queue state is rebuilt from the audit log, so decisions persist and proposals aren't logged twice.
+- **Restart-safe:** proposals are pinned in the audit log and restored verbatim, so a reviewer always sees exactly what was proposed, never a regenerated model output. Only cases the log has never seen are triaged.
 
 No login in v1: the reviewer types their name. A real deployment puts SSO in front and takes the identity from it.
 

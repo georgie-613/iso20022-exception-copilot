@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from copilot.agent import Copilot, Proposal
 from copilot.approval import ApprovalError, ApprovalQueue
 from copilot.audit import AuditLog
+from copilot.llm import make_model
 
 ACTION_LABEL = {
     "repair": ("Repair drafted", "repair"),
@@ -35,19 +36,26 @@ ACTION_LABEL = {
 
 
 def create_app(cases_dir: str | Path | None = None, case_set: str | None = None,
-               audit_path: str | Path | None = None) -> FastAPI:
+               audit_path: str | Path | None = None, model=None) -> FastAPI:
     cases_dir = Path(cases_dir or os.environ.get("CASES_DIR", "cases"))
     case_set = case_set or os.environ.get("CASE_SET", "demo")
     audit = AuditLog(audit_path or os.environ.get("AUDIT_LOG", "audit.jsonl"))
     queue = ApprovalQueue(audit)
-    copilot = Copilot()
+    copilot = Copilot(model=model or make_model(), audit=audit)
 
+    # Proposals already in the log are restored verbatim (never regenerated);
+    # only cases the log has never seen are triaged.
+    logged = queue.restore()
     proposals: dict[str, Proposal] = {}
     for d in sorted(cases_dir.iterdir()) if cases_dir.exists() else []:
         lf = d / "label.json"
-        if lf.exists() and json.loads(lf.read_text()).get("set") == case_set:
+        if not (lf.exists() and json.loads(lf.read_text()).get("set") == case_set):
+            continue
+        if d.name in logged:
+            proposals[d.name] = logged[d.name]
+        else:
             proposals[d.name] = copilot.triage(d)
-    queue.load(list(proposals.values()))
+            queue.submit(proposals[d.name])
 
     app = FastAPI(title="ISO 20022 Exception Copilot")
 
@@ -89,6 +97,8 @@ def create_app(cases_dir: str | Path | None = None, case_set: str | None = None,
         ]
         if error:
             parts.append(f'<div class="error">{_e(error)}</div>')
+        if p.model_note:
+            parts.append(f'<p class="muted">Model note: {_e(p.model_note)}</p>')
 
         if p.repair:
             parts.append("<h2>Proposed change</h2><table><tr><th>Field</th><th>Before</th><th>After</th></tr>")
