@@ -79,3 +79,44 @@ def test_fallbacks_are_counted_and_fail_the_run(holdout, tmp_path):
     assert "FAILED" in md   # a run that fell back is not a model result
     assert "## Fallbacks: why the model's answer wasn't used" in md
     assert "classify_recall: ConnectionError: network down" in md
+
+
+def test_guardrail_rejection_is_reported_not_failed(tmp_path):
+    """A model output blocked by a check is the control working: shown, not a failed run."""
+    from gen.build import build
+    from copilot.llm import OutreachDraft
+    cases = tmp_path / "cases"
+    build(42, cases)
+
+    def write(kw):
+        if "end_to_end_id" in kw["messages"][0]["content"]:
+            return OutreachDraft(message="We will never ask for your password.", confidence=0.9)
+        raise AssertionError("unexpected call")
+
+    def classify(kw):
+        return RecallClassification(reason="FRAD", fraud_indicators=["x"], confidence=0.9, rationale="r")
+
+    def responder(kw):
+        return write(kw) if "Facts:" in kw["messages"][0]["content"] else classify(kw)
+
+    after = evaluate(cases, Copilot(model=_fake(responder), audit=AuditLog(tmp_path / "a.jsonl")))
+    m = after["metrics"]
+    assert m["model_api_failures"] == 0 and m["model_outputs_rejected"] > 0
+    md = compare(evaluate(cases, make_copilot("rules")), after)
+    assert "## Outputs blocked by guardrails" in md
+    assert "We will never ask for your password." in md
+    assert "no failed model calls): PASSED" in md
+
+
+def test_rejected_output_and_prompt_hash_are_audited(tmp_path):
+    from gen.build import build
+    from copilot.llm import OutreachDraft
+    cases = tmp_path / "cases"
+    build(42, cases)
+    log = AuditLog(tmp_path / "a.jsonl")
+    m = _fake(lambda kw: OutreachDraft(message="Reply with your PIN.", confidence=0.9))
+    Copilot(model=m, audit=log).triage(cases / "A-AC04-01")
+    [e] = [e["payload"] for e in log.events() if e["event"] == "model_call"]
+    assert e["fallback_kind"] == "check_rejected"
+    assert e["rejected_output"]["message"] == "Reply with your PIN."
+    assert e["prompt_sha256"] and len(e["prompt_sha256"]) == 64   # kept even though the output was blocked

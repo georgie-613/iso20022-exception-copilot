@@ -118,7 +118,7 @@ Claude does two jobs and nothing else: classify the client's recall request (DUP
 | Confidence floor | Below `COPILOT_MIN_CONFIDENCE` (default 0.7) the case goes to a person |
 | Outreach fact check | The message must carry the exact reference and amount, may not introduce account-like numbers, and may not ask for credentials; otherwise the rules template is used |
 | Fallback | No key, an API error, a refusal or a failed check means the rules baseline answers, and the proposal says so |
-| Audit | Every call logs model, prompt SHA-256, latency, output and whether it fell back |
+| Audit | Every call logs model, prompt SHA-256, latency, output, whether it fell back and why (API error vs guardrail), and the blocked output when a check rejects one |
 | Client text is data | The request is wrapped in `<client_request>` tags; the system prompt says to ignore instructions inside it, and the fraud override doesn't depend on the model obeying |
 
 Self-reported confidence is a weak signal on its own, so it's one control of several, not the safety mechanism.
@@ -186,7 +186,7 @@ python -m evals.run --cases cases_holdout --set holdout --report-only
 python -m evals.compare --cases cases_holdout --set holdout   # needs ANTHROPIC_API_KEY
 ```
 
-Runs both on the same cases and writes a side-by-side table plus a failure analysis of every model miss, with the model's own rationale and fraud indicators. It exits non-zero if the model run breaks a hard gate or quietly fell back to rules, because a fallback run is not a model result. In GitHub: **Actions → live-eval → Run workflow** (uses the `ANTHROPIC_API_KEY` repo secret; regular CI never calls the API).
+Runs both on the same cases and writes a side-by-side table plus a failure analysis of every model miss, with the model's own rationale and fraud indicators. It exits non-zero if the model run breaks a hard gate (false repairs, zero-miss) or if model calls **failed** (API error, refusal), because then the numbers are really the rules baseline's. A model output **blocked by a guardrail** is different: the control worked, so it is reported, with the blocked text, but doesn't fail the run. In GitHub: **Actions → live-eval → Run workflow** (uses the `ANTHROPIC_API_KEY` repo secret; regular CI never calls the API).
 
 **Live results** (`claude-sonnet-5-5`, 2026-10-20, [full report](evals/results/live-eval-2026-10-20-run-39357904969.md), published as-is):
 
@@ -197,7 +197,7 @@ Runs both on the same cases and writes a side-by-side table plus a failure analy
 | Recall reason accuracy | 25% | 83% |
 | Action accuracy | 78% | 89% |
 | Routing precision | 100% | 85% |
-| Hard gates (false repairs = 0, zero-miss = 0, no fallbacks) | failed | **passed** |
+| Hard gates (false repairs = 0, zero-miss = 0, no failed model calls) | failed | **passed** |
 
 **What the model got wrong (2 of 18)**, both in the safe direction: two technical-error recalls were escalated to a person instead of drafted.
 - *H-B-TECH-GLITCH*: "released before it was approved internally". The model read an unapproved release as possibly unauthorized and chose FRAD (confidence 0.6). The prompt says "when in doubt, choose FRAD", and it did.
@@ -205,7 +205,7 @@ Runs both on the same cases and writes a side-by-side table plus a failure analy
 
 That is why routing precision drops to 85%: over-escalation costs analyst minutes, a missed fraud costs the money. The prompt was **not** changed after seeing these results; any change gets a held-out v2.
 
-**Golden set (50):** identical to the baseline on every metric (100% action accuracy, 0 false repairs, 0 zero-miss), **but the run is marked failed** because of one fallback. On A-AC04-02 the outreach fact check rejected the model's message ("asks for credentials") and the rules template went out instead. The control did its job, but whether a check rejection should fail the run (vs. only an API failure) is an open decision, see the PR.
+**Golden set (50):** identical to the baseline on every metric (100% action accuracy, 0 false repairs, 0 zero-miss), **but the run is marked failed** because of one fallback. On A-AC04-02 the outreach fact check rejected the model's message ("asks for credentials") and the rules template went out instead. The control did its job. That run predates the gate split below; under the current gate a guardrail block is reported, not failed.
 
 The strict `xfail` stays: it asserts the *rules baseline* catches implicit fraud, and the rules still don't. The gap is closed by the model layer, measured here, not by the rules.
 

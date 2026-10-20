@@ -28,8 +28,16 @@ ROWS = [
     ("Action accuracy", "action_accuracy"),
     ("Routing precision", "routing_precision"),
     ("Recall reason accuracy", "recall_reason_acc"),
-    ("Cases where the model fell back to rules", "model_calls_fell_back"),
+    ("Model calls that failed (API error, refusal)", "model_api_failures"),
+    ("Model outputs blocked by guardrails (template used)", "model_outputs_rejected"),
 ]
+
+
+def run_gate(m: dict) -> bool:
+    """A model run counts only if it really ran on the model: API failures make it a rules run
+    in disguise, so they fail it. A guardrail blocking an output is the control working; it is
+    reported (with the blocked text) but does not fail the run."""
+    return m["gate_passed"] and m.get("model_api_failures", 0) == 0
 
 
 def _fraud_miss(result: dict) -> tuple[int, int]:
@@ -57,8 +65,8 @@ def compare(before: dict, after: dict) -> str:
         "| Metric | Rules baseline | Model |", "|---|---|---|",
     ]
     lines += [f"| {label} | {_fmt(k, mb, before)} | {_fmt(k, ma, after)} |" for label, k in ROWS]
-    gate = ma["gate_passed"] and ma.get("model_calls_fell_back", 0) == 0
-    lines += ["", f"**Model run hard gates (false repairs = 0, zero-miss = 0, no fallbacks): "
+    gate = run_gate(ma)
+    lines += ["", f"**Model run hard gates (false repairs = 0, zero-miss = 0, no failed model calls): "
                   f"{'PASSED' if gate else 'FAILED'}**", ""]
 
     misses = [r for r in after["rows"] if not r["correct"]]
@@ -74,6 +82,17 @@ def compare(before: dict, after: dict) -> str:
                 f"| {r['case_id']} | {r['expected']} | {r['proposed']} | {o.get('reason', '')} | "
                 f"{o.get('confidence', '')} | {'; '.join(o.get('fraud_indicators') or []) or '-'} | "
                 f"{(o.get('rationale') or r.get('model_note') or '').replace('|', '/')} |")
+        lines.append("")
+
+    blocked = [(r["case_id"], x) for r in after["rows"] for x in r.get("rejected_outputs", [])]
+    if blocked:
+        lines += ["## Outputs blocked by guardrails", "",
+                  "The model answered; a check rejected the answer and the rules template went out instead.", "",
+                  "| Case | Check | Blocked output |", "|---|---|---|"]
+        for cid, x in blocked:
+            text = (x.get("output") or {}).get("message") or (x.get("output") or {})
+            text = str(text).replace("|", "/").replace("\n", " ")[:400]
+            lines.append(f"| {cid} | {x['error'].replace('ModelCheckFailed: ', '')} | {text} |")
         lines.append("")
 
     fb = [r for r in after["rows"] if r.get("fallback_errors")]
@@ -112,7 +131,7 @@ def main() -> None:
         json.dumps({"before": before, "after": after}, indent=2, default=str) + "\n")
     print(md)
     ma = after["metrics"]
-    sys.exit(0 if ma["gate_passed"] and ma.get("model_calls_fell_back", 0) == 0 else 1)
+    sys.exit(0 if run_gate(ma) else 1)
 
 
 if __name__ == "__main__":
