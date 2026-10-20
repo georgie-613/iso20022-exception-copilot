@@ -1,0 +1,56 @@
+name: live-eval
+
+# Manual only. Calls the Anthropic API with the repo secret ANTHROPIC_API_KEY,
+# runs rules vs model on the held-out set and the golden set, and publishes the
+# comparison to the job summary and as an artifact. Regular CI never calls the API.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Claude model ID"
+        default: "claude-sonnet-5-5"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  live-eval:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      COPILOT_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check the key is configured
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::Add ANTHROPIC_API_KEY under Settings > Secrets and variables > Actions"; exit 1
+          fi
+      - run: pip install -e ".[llm]"
+      - name: Build case sets
+        run: |
+          python -m gen.build --seed 42 --out cases
+          python -m gen.holdout --seed 42 --out cases_holdout
+      - name: Held-out before/after
+        id: holdout
+        continue-on-error: true
+        run: python -m evals.compare --cases cases_holdout --set holdout --out evals/results
+      - name: Golden set before/after (regression check)
+        id: golden
+        continue-on-error: true
+        run: python -m evals.compare --cases cases --set eval --out evals/results
+      - name: Publish
+        if: always()
+        run: cat evals/results/*_comparison.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-eval-results
+          path: evals/results/
+      - name: Fail if a hard gate broke
+        if: steps.holdout.outcome == 'failure' || steps.golden.outcome == 'failure'
+        run: exit 1
