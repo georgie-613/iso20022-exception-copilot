@@ -136,17 +136,23 @@ class Copilot:
     # ---- model calls: timed, hashed, checked, logged, with fallback ----
     def _call(self, case_id: str, kind: str, fn_name: str, arg: Any, check=None):
         start = time.perf_counter()
-        used, error = self.model, None
+        used, error, fallback_kind = self.model, None, None
+        out = prompt = rejected = None
         try:
             out, prompt = getattr(self.model, fn_name)(arg)
             if out is None:  # refusal or truncated output: no schema-valid answer
-                raise ModelCheckFailed("model returned no structured output")
+                raise RuntimeError("model returned no structured output")
             if check:
                 check(out)
-        except Exception as e:  # noqa: BLE001 - any model failure falls back to rules
-            error = f"{type(e).__name__}: {e}"[:300]
+        except ModelCheckFailed as e:
+            # The model answered; a guardrail blocked the answer. The control working.
+            error, fallback_kind = f"ModelCheckFailed: {e}"[:300], "check_rejected"
+            rejected = out.model_dump() if out is not None else None
+        except Exception as e:  # noqa: BLE001 - transport/API/refusal: no usable model answer
+            error, fallback_kind = f"{type(e).__name__}: {e}"[:300], "api_error"
+        if fallback_kind:
             used = self.fallback
-            out, prompt = getattr(self.fallback, fn_name)(arg)
+            out, _ = getattr(self.fallback, fn_name)(arg)
         latency_ms = round((time.perf_counter() - start) * 1000)
         if self.audit is not None and not isinstance(self.model, RulesBaseline):
             self.audit.append(case_id, MODEL_ACTOR, "model_call", {
@@ -154,9 +160,11 @@ class Copilot:
                 "model": self.model.name,
                 "answered_by": used.name,
                 "fallback": used is self.fallback,
+                "fallback_kind": fallback_kind,         # None | check_rejected | api_error
                 "error": error,
                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest() if prompt else None,
                 "latency_ms": latency_ms,
+                "rejected_output": rejected,            # what the guardrail blocked, for review
                 "output": out.model_dump(),
             })
         return out, used, error

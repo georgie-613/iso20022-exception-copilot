@@ -69,6 +69,9 @@ def evaluate(cases: Path, copilot: Copilot | None = None, set_: str = "eval") ->
             "model_note": p.model_note,
             "fell_back": any(c["fallback"] for c in calls),
             "fallback_errors": [f'{c["kind"]}: {c["error"]}' for c in calls if c["fallback"]],
+            "api_failures": sum(c.get("fallback_kind") == "api_error" for c in calls),
+            "rejected_outputs": [{"kind": c["kind"], "error": c["error"], "output": c.get("rejected_output")}
+                                 for c in calls if c.get("fallback_kind") == "check_rejected"],
             "model_output": calls[-1]["output"] if calls else None,
             "latency_ms": sum(c["latency_ms"] for c in calls) if calls else None,
         })
@@ -91,6 +94,8 @@ def evaluate(cases: Path, copilot: Copilot | None = None, set_: str = "eval") ->
         "recall_reason_acc": (sum(r["reason_proposed"] == r["code"] for r in lane_b) / len(lane_b)) if lane_b else None,
     }
     metrics["model_calls_fell_back"] = sum(r["fell_back"] for r in rows)
+    metrics["model_api_failures"] = sum(r["api_failures"] for r in rows)
+    metrics["model_outputs_rejected"] = sum(len(r["rejected_outputs"]) for r in rows)
     metrics["gate_passed"] = metrics["false_repairs"] == 0 and metrics["zero_miss_misses"] == 0
     return {"metrics": metrics, "failures": [r for r in rows if not r["correct"]], "rows": rows}
 
