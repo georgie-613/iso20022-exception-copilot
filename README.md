@@ -14,7 +14,7 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 | Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
 | Eval runner + CI gate | ✅ Day 4 |
 | Approval screen (queue, diff, approve/reject, audit trail) | ✅ Day 6 |
-| LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 (live eval in PR 8) |
+| LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 · live: implicit fraud missed 4/5 → 0/5 |
 | Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
 
 ## Scope (v1)
@@ -188,7 +188,28 @@ python -m evals.compare --cases cases_holdout --set holdout   # needs ANTHROPIC_
 
 Runs both on the same cases and writes a side-by-side table plus a failure analysis of every model miss, with the model's own rationale and fraud indicators. It exits non-zero if the model run breaks a hard gate or quietly fell back to rules, because a fallback run is not a model result. In GitHub: **Actions → live-eval → Run workflow** (uses the `ANTHROPIC_API_KEY` repo secret; regular CI never calls the API).
 
-**Live results: pending first run.** They will be published here as-is, misses included. The held-out set is not used to tune prompts; if a prompt changes after seeing it, a held-out v2 is written and reported instead.
+**Live results** (`claude-sonnet-5-5`, 2026-10-20, [full report](evals/results/live-eval-2026-10-20-run-39357904969.md), published as-is):
+
+| Held-out set (18 cases the rules never saw) | Rules baseline | Claude |
+|---|---|---|
+| **Fraud missed** (implicit: BEC, lookalike domain, vendor callback, Portuguese) | **4 of 5** | **0 of 5** |
+| False repairs | 0 | 0 |
+| Recall reason accuracy | 25% | 83% |
+| Action accuracy | 78% | 89% |
+| Routing precision | 100% | 85% |
+| Hard gates (false repairs = 0, zero-miss = 0, no fallbacks) | failed | **passed** |
+
+**What the model got wrong (2 of 18)**, both in the safe direction: two technical-error recalls were escalated to a person instead of drafted.
+- *H-B-TECH-GLITCH*: "released before it was approved internally". The model read an unapproved release as possibly unauthorized and chose FRAD (confidence 0.6). The prompt says "when in doubt, choose FRAD", and it did.
+- *H-B-TECH-H2H*: a host-to-host resend after a timeout. Classed DUPL at 0.6 confidence, below the 0.7 floor, so it went to a person.
+
+That is why routing precision drops to 85%: over-escalation costs analyst minutes, a missed fraud costs the money. The prompt was **not** changed after seeing these results; any change gets a held-out v2.
+
+**Golden set (50):** identical to the baseline on every metric (100% action accuracy, 0 false repairs, 0 zero-miss), **but the run is marked failed** because of one fallback. On A-AC04-02 the outreach fact check rejected the model's message ("asks for credentials") and the rules template went out instead. The control did its job, but whether a check rejection should fail the run (vs. only an API failure) is an open decision, see the PR.
+
+The strict `xfail` stays: it asserts the *rules baseline* catches implicit fraud, and the rules still don't. The gap is closed by the model layer, measured here, not by the rules.
+
+The held-out set is not used to tune prompts; if a prompt changes after seeing it, a held-out v2 is written and reported instead.
 
 The fraud misses are the known gap, tracked as a strict `xfail` test, and it is the model layer's job to close it. Even today a missed fraud case lands as a *recall draft awaiting human approval*, not an action; the zero-miss gate exists so the model can't ship until a person never has to catch it.
 
