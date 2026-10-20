@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  issues: write   # results are posted to an issue so they can be read without log access
 
 jobs:
   live-eval:
@@ -46,6 +47,18 @@ jobs:
       - name: Publish
         if: always()
         run: cat evals/results/*_comparison.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Post results to an issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} · model: \`$COPILOT_MODEL\` · commit: ${{ github.sha }}"
+            echo
+            cat evals/results/*_comparison.md 2>/dev/null || echo "No results written; see the run log."
+          } > issue.md
+          gh label create live-eval --color 5b3db5 --description "Live eval results" --force
+          gh issue create --title "live-eval run ${{ github.run_id }}" --label live-eval --body-file issue.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:
