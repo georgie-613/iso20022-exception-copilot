@@ -34,11 +34,11 @@ def _labels(cases: Path) -> list[Label]:
 
 def test_case_counts(cases):
     labels = _labels(cases)
-    assert len(labels) == 61
+    assert len(labels) == 63
     assert sum(l.set == "eval" for l in labels) == 50
     assert sum(l.set == "eval" and l.lane == "A" for l in labels) == 40
     assert sum(l.set == "eval" and l.lane == "B" for l in labels) == 10
-    assert sum(l.set == "demo" for l in labels) == 11
+    assert sum(l.set == "demo" for l in labels) == 13
 
 
 def test_all_18_codes_present_in_eval(cases):
@@ -66,11 +66,16 @@ def test_xsd_validity(cases):
             assert errs, f"{d.name} should fail the XSD"
         else:
             assert not errs, f"{d.name}: {errs}"
+        if label.lane == "C":     # pre-send: no status report yet
+            assert not (d / "pacs002.xml").exists()
+            continue
         assert not validate((d / "pacs002.xml").read_bytes(), "pacs.002.001.10"), d.name
 
 
 def test_status_matches_lane(cases):
     for l in _labels(cases):
+        if l.lane == "C":
+            continue
         xml = (cases / l.case_id / "pacs002.xml").read_text()
         if l.lane == "A":
             assert "<TxSts>RJCT</TxSts>" in xml and f"<Cd>{l.code}</Cd>" in xml
@@ -142,7 +147,7 @@ def test_valid_ibans_except_ac01(cases):
 
 def test_manifest(cases):
     m = json.loads((cases / "manifest.json").read_text())
-    assert m["seed"] == 42 and m["count"] == 61
+    assert m["seed"] == 42 and m["count"] == 63
 
 
 def test_implicit_fraud_demo_case(cases):

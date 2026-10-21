@@ -3,6 +3,8 @@
 Flow per case:
   Lane A (RJCT): explain_reject -> policy action -> draft_repair or outreach note
   Lane B (ACSC + client request): classify the request -> draft recall or escalate
+  Lane C (outbound, free-text creditor address): country rules -> model for what
+         the rules can't place -> checks -> draft CBPR+ address or a person decides
 
 The model only ever does two things: classify free-text recall requests and
 word client outreach. It never decides whether something is repairable and
@@ -30,10 +32,11 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
+from iso20022_mcp import address as addr_rules
 from iso20022_mcp.parser import parse
 from iso20022_mcp.triage import draft_repair, explain_reject
 
-from .llm import OutreachDraft, RecallClassification
+from .llm import AddressProposal, OutreachDraft, RecallClassification
 
 Action = Literal["repair", "outreach", "escalate", "recall"]
 
@@ -47,7 +50,7 @@ def min_confidence() -> float:
 
 class Proposal(BaseModel):
     case_id: str
-    lane: Literal["A", "B"]
+    lane: Literal["A", "B", "C"]
     reason_code: str | None
     action: Action
     summary: str
@@ -67,6 +70,8 @@ class LanguageModel(Protocol):
     def classify_recall(self, request_text: str) -> tuple[RecallClassification, str | None]: ...
 
     def write_outreach(self, context: dict[str, Any]) -> tuple[OutreachDraft, str | None]: ...
+
+    def structure_address(self, arg: dict[str, Any]) -> tuple[AddressProposal, str | None]: ...
 
 
 class RulesBaseline:
@@ -99,6 +104,12 @@ class RulesBaseline:
             "process it once we have the information.\n"
         )
         return OutreachDraft(message=msg, confidence=1.0), None
+
+    def structure_address(self, arg: dict[str, Any]) -> tuple[AddressProposal, None]:
+        # The country rules already ran; the baseline has nothing more to offer.
+        return AddressProposal(strt_nm=None, bldg_nb=None, pst_cd=None, twn_nm=None, dstrct_nm=None,
+                               ctry_sub_dvsn=None, adr_lines=[], confidence=0.0,
+                               rationale="no rules for this format"), None
 
 
 _OUTREACH_ASK = {
@@ -189,6 +200,8 @@ class Copilot:
 
     def triage(self, case_dir: str | Path) -> Proposal:
         d = Path(case_dir)
+        if not (d / "pacs002.xml").exists():   # not sent yet: Lane C pre-send address remediation
+            return self._address(d.name, (d / "pacs008.xml").read_bytes())
         p8, p2 = (d / "pacs008.xml").read_bytes(), (d / "pacs002.xml").read_bytes()
         status = parse(p2)
         if status["status"] == "ACSC":
@@ -270,3 +283,53 @@ class Copilot:
         return Proposal(**base, reason_code=c.reason, action="recall", recall=recall, model_note=note,
                         client_request=request.strip() or None,
                         summary=f"Client requests recall ({c.reason}). camt.056 drafted for approval.")
+
+    # ---- Lane C ----
+    def _address(self, case_id: str, p8: bytes) -> Proposal:
+        base = dict(case_id=case_id, lane="C", reason_code="ADDR", model=self.model.name)
+        r = addr_rules.draft_address(p8)
+        if r["status"] in ("STRUCTURED", "HYBRID"):
+            return Proposal(**base, action="repair", repair=r,
+                            summary=f"Unstructured creditor address. Country rules drafted a CBPR+ "
+                                    f"{r['format']} address. Why: {r['why']}")
+        if r["status"] != "NEEDS_REVIEW":
+            return Proposal(**base, action="escalate", summary=f"Address: {r['reason']}")
+
+        # The rules couldn't place it. Ask the model only when the country is settled:
+        # a country conflict or no country at all is never the model's call.
+        tx = parse(p8)["transaction"]
+        lines = tx["creditor"]["address"].get("adr_lines") or []
+        ctry, ev, problem = addr_rules.resolve_country(
+            lines, (tx.get("creditor_account") or {}).get("iban"), tx["creditor_agent"]["bic"])
+        review = Proposal(**base, action="escalate",
+                          summary=f"Unstructured creditor address; a person structures it. Rules: {r['reason']}.")
+        if problem or isinstance(self.model, RulesBaseline):
+            return review
+
+        def as_addr(o: AddressProposal) -> dict:
+            a = {k: getattr(o, k) for k in addr_rules.FIELDS if k != "ctry" and getattr(o, k)}
+            a["ctry"] = ctry
+            if o.adr_lines:
+                a["adr_lines"] = o.adr_lines
+            return a
+
+        def check(o: AddressProposal) -> None:
+            if issues := addr_rules.check_proposal(as_addr(o), lines, ctry):
+                raise ModelCheckFailed("; ".join(issues))
+
+        o, used, error = self._call(case_id, "structure_address", "structure_address",
+                                    {"lines": lines, "country": ctry}, check=check)
+        if used is self.fallback:
+            return review.model_copy(update={"model_note": f"Model output not used ({error})."})
+        if o.confidence < min_confidence():
+            return review.model_copy(update={"model_note": f"low confidence {o.confidence:.2f}"})
+        why = (f"No {ctry} rules matched ({r['reason']}). The model split the address; code verified "
+               f"every value appears in the original, the result is valid CBPR+, and the country "
+               f"({ctry}) matches the evidence. Model: {o.rationale}")
+        draft = addr_rules.finalize(p8, as_addr(o), why)
+        if draft["status"] != "DRAFT_PENDING_APPROVAL":
+            return review.model_copy(update={"model_note": f"Model draft refused: {draft['reason']}"})
+        return Proposal(**base, action="repair", repair=draft,
+                        summary=f"Unstructured creditor address. Model drafted a CBPR+ {draft['format']} "
+                                f"address; every value checked against the original. Why: {why}")
+

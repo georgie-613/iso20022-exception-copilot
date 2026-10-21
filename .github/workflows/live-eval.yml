@@ -1,7 +1,7 @@
 name: live-eval
 
 # Manual only. Calls the Anthropic API with the repo secret ANTHROPIC_API_KEY,
-# runs rules vs model on the held-out set and the golden set, and publishes the
+# runs rules vs model on the held-out and golden sets (recalls, outreach, addresses), and publishes the
 # comparison to the job summary and as an artifact. Regular CI never calls the API.
 on:
   workflow_dispatch:
@@ -36,6 +36,8 @@ jobs:
         run: |
           python -m gen.build --seed 42 --out cases
           python -m gen.holdout --seed 42 --out cases_holdout
+          python -m gen.addresses --seed 42 --out cases_address
+          python -m gen.addresses --seed 42 --out cases_address_holdout --holdout
       - name: Held-out before/after
         id: holdout
         continue-on-error: true
@@ -44,9 +46,17 @@ jobs:
         id: golden
         continue-on-error: true
         run: python -m evals.compare --cases cases --set eval --out evals/results
+      - name: Address held-out, rules vs model
+        id: address_holdout
+        continue-on-error: true
+        run: python -m evals.address --cases cases_address_holdout --set address-holdout --compare --out evals/results
+      - name: Address set, rules vs model (regression check)
+        id: address
+        continue-on-error: true
+        run: python -m evals.address --cases cases_address --set address --compare --out evals/results
       - name: Publish
         if: always()
-        run: cat evals/results/*_comparison.md >> "$GITHUB_STEP_SUMMARY"
+        run: cat evals/results/*_comparison.md evals/results/*_address.md >> "$GITHUB_STEP_SUMMARY"
       - name: Post results to an issue
         if: always()
         env:
@@ -55,7 +65,7 @@ jobs:
           {
             echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} · model: \`$COPILOT_MODEL\` · commit: ${{ github.sha }}"
             echo
-            cat evals/results/*_comparison.md 2>/dev/null || echo "No results written; see the run log."
+            cat evals/results/*_comparison.md evals/results/*_address.md 2>/dev/null || echo "No results written; see the run log."
           } > issue.md
           gh label create live-eval --color 5b3db5 --description "Live eval results" --force
           gh issue create --title "live-eval run ${{ github.run_id }}" --label live-eval --body-file issue.md
@@ -65,5 +75,7 @@ jobs:
           name: live-eval-results
           path: evals/results/
       - name: Fail if a hard gate broke
-        if: steps.holdout.outcome == 'failure' || steps.golden.outcome == 'failure'
+        if: >-
+          steps.holdout.outcome == 'failure' || steps.golden.outcome == 'failure' ||
+          steps.address_holdout.outcome == 'failure' || steps.address.outcome == 'failure'
         run: exit 1

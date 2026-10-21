@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from gen.customers import iban_is_valid
 from gen.validate import validate as xsd_validate
 
+from .address import classify as classify_address
 from .parser import ParseError, load, parse
 from .refdata import KNOWN_CURRENCIES, bic_directory
 
@@ -78,6 +79,13 @@ def _business_findings_pacs008(p: dict[str, Any]) -> list[Finding]:
     if tx.get("creditor") and tx["creditor"].get("address") is None:
         out.append(Finding(rule="creditor_address", severity="error", field="Cdtr.PstlAdr",
                            message="creditor postal address missing", reason_code_hint="RR03"))
+
+    for role, key in [("Dbtr", "debtor"), ("Cdtr", "creditor")]:
+        adr = (tx.get(key) or {}).get("address")
+        if adr and classify_address(adr) == "unstructured":
+            out.append(Finding(rule="cbpr_address", severity="warning", field=f"{role}.PstlAdr",
+                               message="unstructured postal address: CBPR+ hybrid/structured needs Town Name "
+                                       "and Country as separate elements (use structure_address)"))
 
     for role, key in [("DbtrAcct", "debtor_account"), ("CdtrAcct", "creditor_account")]:
         iban = (tx.get(key) or {}).get("iban")

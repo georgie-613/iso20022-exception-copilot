@@ -71,8 +71,8 @@ class Label(BaseModel):
     """
 
     case_id: str
-    set: Literal["eval", "demo", "holdout"]
-    lane: Literal["A", "B"]
+    set: Literal["eval", "demo", "holdout", "address", "address-holdout"]
+    lane: Literal["A", "B", "C"]
     code: str
     action: Action
     allowed_fields: list[str] = Field(default_factory=list)

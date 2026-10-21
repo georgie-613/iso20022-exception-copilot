@@ -13,6 +13,7 @@ from typing import Any
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
+from .address import draft_address as _draft_address
 from .parser import ParseError, parse
 from .triage import draft_repair as _draft_repair
 from .triage import explain_reject as _explain_reject
@@ -26,7 +27,8 @@ server = MCPServer(
         "validate_message to find defects mapped to likely ISO reason codes, "
         "explain_reject to classify a pacs.002 reject under the reason-code policy, and "
         "draft_repair to propose a fix for a repairable reject. draft_repair only ever returns "
-        "a DRAFT for human approval; it never sends anything."
+        "a DRAFT for human approval; it never sends anything. structure_address turns a "
+        "free-text creditor address into a CBPR+ structured or hybrid address, as a draft."
     ),
 )
 
@@ -79,6 +81,20 @@ def draft_repair(pacs008_xml: str, pacs002_xml: str) -> dict[str, Any]:
     must pass validation. Nothing is sent; a human approves every draft.
     """
     return _draft_repair(pacs008_xml, pacs002_xml)
+
+
+@server.tool(annotations=READ_ONLY)
+def structure_address(pacs008_xml: str) -> dict[str, Any]:
+    """Draft a CBPR+ structured or hybrid creditor address from free-text address lines.
+
+    Country rules (MX, BR, CO, AR, GB, DE) place street, number, postcode, district,
+    town and state; what they can't place stays as address lines (hybrid, max 2 x 70).
+    Returns STRUCTURED or HYBRID with a field-level diff and the drafted XML, or
+    NEEDS_REVIEW with the reason. Never invents text, never guesses a town or a
+    country: every value must appear in the original address, and the country must
+    agree with the IBAN and the creditor agent BIC. Nothing is sent.
+    """
+    return _draft_address(pacs008_xml)
 
 
 def main() -> None:
