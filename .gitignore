@@ -9,3 +9,6 @@ evals/report/
 audit*.jsonl
 cases_holdout/
 evals/report-holdout/
+cases_address/
+cases_address_holdout/
+evals/report-address/

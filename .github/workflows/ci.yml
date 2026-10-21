@@ -27,3 +27,13 @@ jobs:
           python -m gen.holdout --seed 42 --out cases_holdout
           python -m evals.run --cases cases_holdout --set holdout --report-only --out evals/report-holdout
           cat evals/report-holdout/report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Address structuring gate (unsafe = 0)
+        run: |
+          python -m gen.addresses --seed 42 --out cases_address
+          python -m evals.address --cases cases_address --set address --out evals/report-address
+          cat evals/report-address/address_address.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Address held-out (report only)
+        run: |
+          python -m gen.addresses --seed 42 --out cases_address_holdout --holdout
+          python -m evals.address --cases cases_address_holdout --set address-holdout --report-only --out evals/report-address
+          cat evals/report-address/address-holdout_address.md >> "$GITHUB_STEP_SUMMARY"

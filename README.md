@@ -1,6 +1,6 @@
 # ISO 20022 Exception Copilot
 
-An open-source ISO 20022 MCP server and an exception-triage copilot for rejected and recalled cross-border payments. The copilot drafts a fix, a client message or a recall; a human approves every action; every step is logged.
+An open-source ISO 20022 MCP server and an exception-triage copilot for cross-border payments: rejected payments, recall requests, and free-text beneficiary addresses that must become CBPR+ structured addresses. The copilot drafts a fix, a client message, a recall or a structured address; a human approves every action; every step is logged.
 
 ![Architecture: payment case to read-only MCP tools, copilot, Claude behind guardrails, proposal, human approval, hash-chained audit log](docs/architecture.png)
 
@@ -12,7 +12,7 @@ An open-source ISO 20022 MCP server and an exception-triage copilot for rejected
 
 ```
 pip install -e ".[ui]"                    # Python 3.12+
-python -m gen.build --seed 42             # 61 synthetic cases
+python -m gen.build --seed 42             # 63 synthetic cases
 uvicorn ui.app:create_app --factory       # open http://127.0.0.1:8000
 ```
 
@@ -25,6 +25,8 @@ Set `ANTHROPIC_API_KEY` first to run Claude; without it the deterministic rules 
 | `DEMO-01-RC01` | Creditor agent BIC is wrong; the right one is in the bank's directory | One-field before/after diff, the validated repaired XML, approve it, the audit entry with its hash |
 | `DEMO-05-AC01` | Account number rejected | The copilot does **not** guess a number: it drafts a client message. Try approving as `copilot`: refused (maker-checker) |
 | `DEMO-11-FRAD` | Client asks to recall a payment their controller sent on a text from the CEO's "new mobile number". No fraud keywords | With Claude: escalated to a person with the fraud indicator, no recall drafted. With the rules baseline: a recall is drafted, the gap the model closes |
+| `DEMO-12-ADDR` | Brazilian beneficiary address stored as free text | Brazil rules turn it into a CBPR+ structured address field by field, with the reason |
+| `DEMO-13-ADDR` | Chilean address; no Chile rules | Rules send it to a person; with Claude, the model splits it and code verifies every value appears in the original |
 
 **Synthetic data only.** No real bank messages, templates, BICs or customer data. Every BIC uses a test-BIC location code (second character `0`), so none can be a live production BIC.
 
@@ -32,7 +34,7 @@ Set `ANTHROPIC_API_KEY` first to run Claude; without it the deterministic rules 
 
 | Piece | State |
 |---|---|
-| Seeded synthetic case generator (61 cases, XSD-validated) | ✅ Day 1 |
+| Seeded synthetic case generator (63 cases, XSD-validated) | ✅ Day 1 |
 | MCP server: `parse_message`, `validate_message` | ✅ Day 2 |
 | MCP server: `explain_reject`, `draft_repair` + guardrails | ✅ Day 3 |
 | Copilot pipeline + maker-checker approval + hash-chained audit log | ✅ Day 4 (rules baseline) |
@@ -41,12 +43,14 @@ Set `ANTHROPIC_API_KEY` first to run Claude; without it the deterministic rules 
 | Demo polish: diagram, quickstart, 3-case demo story | ✅ PR 9 |
 | LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 · live: implicit fraud missed 4/5 → 0/5, all gates green |
 | Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
+| Lane C: CBPR+ address structuring (country rules + model fallback + `structure_address` tool) | ✅ rules: 21/22 correct, 0 unsafe · held-out 7/12, 0 unsafe · live model run pending |
 
 ## Scope (v1)
 
 - **Rail:** cross-border correspondent payments (CBPR+-style), `pacs.008.001.08` with `pacs.002.001.10` status reports.
 - **Lane A — rejects (14 reason codes):** RC01, CH16, DT01, RR02, RR03, AC01, AC04, BE01, AM04, AM05, AC06, AG01, RR04, MS03.
 - **Lane B — recalls (4 reasons):** DUPL, CUST, TECH, FRAD — candidates for a `camt.056` recall.
+- **Lane C — addresses (pre-send):** free-text creditor addresses turned into CBPR+ structured or hybrid addresses. See [Address structuring](#lane-c-cbpr-address-structuring).
 
 ### The repair boundary
 
@@ -69,7 +73,7 @@ The same rule applies to bank codes. An RC01 is repaired only when the bad BIC i
 python -m gen.build --seed 42 --out cases
 ```
 
-Writes 61 cases: 50 for evaluation (40 Lane A, 10 Lane B, every code covered) and 11 demo cases that are never scored. Each case folder has:
+Writes 63 cases: 50 for evaluation (40 Lane A, 10 Lane B, every code covered) and 13 demo cases that are never scored (2 of them Lane C addresses). Each case folder has:
 
 - `pacs008.xml` — the original payment (passes the XSD, except CH16 cases by design)
 - `pacs002.xml` — the status report (`RJCT` + reason code, or `ACSC` for recalls)
@@ -80,7 +84,7 @@ Output is byte-identical for a given seed.
 
 ## The MCP server
 
-Four tools, all read-only (annotated `readOnlyHint`; none of them change or send anything):
+Five tools, all read-only (annotated `readOnlyHint`; none of them change or send anything):
 
 | Tool | Does |
 |---|---|
@@ -88,6 +92,7 @@ Four tools, all read-only (annotated `readOnlyHint`; none of them change or send
 | `validate_message` | XSD check plus business rules: BIC directory, business day, required debtor/creditor address, IBAN mod-97. Every finding carries `reason_code_hint`, the ISO reason code it would most likely trigger. |
 | `explain_reject` | Explains a pacs.002 reject in plain language and classifies it under the reason-code policy: `repair`, `outreach` or `escalate`. With the original pacs.008 attached, it adds evidence. |
 | `draft_repair` | For RC01, CH16, DT01, RR02 only: returns `DRAFT_PENDING_APPROVAL` with a field-level diff and the repaired XML, or `REFUSED` with where to route it. |
+| `structure_address` | Turns a free-text creditor address into a CBPR+ structured or hybrid address with country rules: `STRUCTURED` / `HYBRID` with a field-level diff and the drafted XML, or `NEEDS_REVIEW` with the reason. Never invents text, never guesses a town or a country. |
 
 ### Guardrails, enforced in code
 
@@ -99,7 +104,7 @@ The policy table in `iso20022_mcp/policy.py` decides what is repairable, not the
 4. **Validation gate**: the repaired message must pass validation.
 5. **Draft only**: nothing is sent. Every draft needs a human.
 
-Against the 61-case set, `explain_reject` matches the answer key on every case and `draft_repair` produces the expected value on every repairable case. That is the deterministic baseline; the agent layer is measured against it.
+Against the Lane A and B cases, `explain_reject` matches the answer key on every case and `draft_repair` produces the expected value on every repairable case. That is the deterministic baseline; the agent layer is measured against it.
 
 A rejected payment that validates **clean** is a signal too: the cause is outside the message (closed account, funds, compliance), so it goes to a person.
 
@@ -131,12 +136,13 @@ The BIC directory is the synthetic one from the generator, behind `iso20022_mcp/
 
 - **Lane A rejects:** `explain_reject` → policy action → `draft_repair` (repair), a drafted client message (outreach), or escalate.
 - **Lane B recalls:** classify the client's free-text request → draft camt.056 fields, or escalate.
+- **Lane C addresses:** `structure_address` country rules → if they can't place it, the model splits it → the same checks → draft a CBPR+ address, or a person decides.
 
-The model's job is narrow: classify recall requests and word client messages. It never decides what is repairable and never edits a payment field. **Any fraud signal in a recall request escalates, whatever the model says**; a test plugs in a model that calls every request routine and checks fraud still reaches a person.
+The model's job is narrow: classify recall requests, word client messages, and split addresses the rules can't handle. It never decides what is repairable and never edits a payment field. **Any fraud signal in a recall request escalates, whatever the model says**; a test plugs in a model that calls every request routine and checks fraud still reaches a person.
 
 ### The model layer (`copilot/llm.py`)
 
-Claude does two jobs and nothing else: classify the client's recall request (DUPL / CUST / TECH / FRAD, in English, Spanish or Portuguese) and word the client outreach message. Controls, all enforced in `copilot/agent.py` rather than in the prompt:
+Claude does three jobs and nothing else: classify the client's recall request (DUPL / CUST / TECH / FRAD, in English, Spanish or Portuguese), word the client outreach message, and split a free-text address the country rules couldn't handle into fields (it never picks the country). Controls, all enforced in `copilot/agent.py` rather than in the prompt:
 
 | Control | What happens |
 |---|---|
@@ -244,6 +250,32 @@ The strict `xfail` stays: it asserts the *rules baseline* catches implicit fraud
 The held-out set is not used to tune prompts; if a prompt changes after seeing it, a held-out v2 is written and reported instead.
 
 The fraud misses are the known gap, tracked as a strict `xfail` test, and it is the model layer's job to close it. Even today a missed fraud case lands as a *recall draft awaiting human approval*, not an action; the zero-miss gate exists so the model can't ship until a person never has to catch it.
+
+## Lane C: CBPR+ address structuring
+
+Most banks store beneficiary addresses as free text, like `"Rua Augusta, 1500 - Consolacao / Sao Paulo - SP / CEP 01304-001 / BRASIL"`. Swift's CBPR+ is moving cross-border payments to **hybrid** addresses (Town Name and Country as separate elements, at most 2 address lines of 70 characters) or **fully structured** ones (no address lines). The hybrid format has been live since November 2025. Swift has since **postponed** retiring fully unstructured addresses, which can continue until at least November 2027, while some banks, J.P. Morgan among them, are keeping their own 14 November 2026 date ([J.P. Morgan](https://www.jpmorgan.com/insights/payments/cross-border-payments/iso-20022-migration)). Either way, the backlog of free-text addresses has to be cleaned, one country format at a time.
+
+```
+python -m gen.addresses --seed 42 --out cases_address                       # 24 cases
+python -m gen.addresses --seed 42 --out cases_address_holdout --holdout     # 13 hand-written cases
+python -m evals.address --cases cases_address --set address                 # CI gate: unsafe = 0
+```
+
+**How a draft is made, in order:**
+1. **Country** from the country line, the creditor's IBAN and the creditor agent's BIC. If they disagree, a person decides. A wrong country breaks sanctions screening, so it is never guessed.
+2. **Country rules** (MX, BR, CO, AR, GB, DE) place street, building number, postcode, district (colonia, bairro), town and state. What they can't place stays as an address line: a **hybrid** address.
+3. If the rules can't find a town, or have no rules for the country, **the model** splits the address. It is never asked when the country is in dispute.
+4. **The same checks run on the rules' draft and the model's:** every value must appear in the original address (no invented, expanded or translated text), the result must be valid CBPR+, the postcode must match the country's format, the country must match the evidence, the drafted message must still pass the XSD and only the creditor address may change. A failed check means a person decides. The blocked output is logged.
+5. A named person approves the draft on the same approval screen, with the field-by-field diff and the reason.
+
+**Results (rules baseline; `rules` never calls a model):**
+
+| Set | Correct drafts | Unsafe (wrong town/country, or drafted when a person must decide) | Sent to a person |
+|---|---|---|---|
+| Address set (24) | 21 of 22 | **0** | 3 (no Peru rules; country conflict; no town) |
+| Held-out (13, hand-written) | 7 of 12 | **0** | 6 (postcode after town, abbreviated "Cra.", Chile, Peru, Costa Rica directions, conflict) |
+
+The held-out cases use formats the rules weren't written for: reordered lines, abbreviations, umlauts, a missing country line, and Costa Rica's directions-style addresses ("Del Parque Central de Heredia 300 metros sur"). They were written by the same author as the rules, so treat them as a stress test, not an independent benchmark. The model's numbers come from the `live-eval` workflow; until a run is published here, this lane is a rules result only.
 
 ## Develop
 

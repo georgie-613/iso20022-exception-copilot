@@ -21,7 +21,7 @@ def cases(tmp_path_factory) -> Path:
 
 def _each(cases):
     for d in sorted(cases.iterdir()):
-        if d.is_dir():
+        if d.is_dir() and (d / "pacs002.xml").exists():   # Lane C is pre-send
             yield d, json.loads((d / "label.json").read_text()), \
                 (d / "pacs008.xml").read_bytes(), (d / "pacs002.xml").read_bytes()
 
@@ -124,9 +124,10 @@ def test_settled_payment_not_actionable(cases):
 
 # ---------- exposed over MCP ----------
 
-def test_four_tools_registered():
+def test_five_tools_registered():
     names = {t.name for t in asyncio.run(server.list_tools())}
-    assert names == {"parse_message", "validate_message", "explain_reject", "draft_repair"}
+    assert names == {"parse_message", "validate_message", "explain_reject", "draft_repair",
+                     "structure_address"}
 
 
 def test_draft_repair_over_mcp(cases):

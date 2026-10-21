@@ -1,13 +1,13 @@
 flowchart LR
-    case["Rejected or settled payment<br/>pacs.008 + pacs.002<br/>+ client recall request"] --> mcp
+    case["Payment case<br/>reject · recall request<br/>· free-text address"] --> mcp
     subgraph mcp["MCP server (read-only)"]
         direction TB
-        t1["parse_message"] --> t2["validate_message"] --> t3["explain_reject"] --> t4["draft_repair"]
+        t1["parse_message"] --> t2["validate_message"] --> t3["explain_reject"] --> t4["draft_repair"] --> t5["structure_address"]
     end
-    policy["Policy table<br/>decides what is repairable"] --> mcp
+    policy["Policy table +<br/>country address rules"] --> mcp
     mcp --> copilot["Copilot"]
-    copilot -- "classify recall request<br/>word client message" --> claude["Claude<br/>schema-constrained output"]
-    claude --> guard["Guardrails in code<br/>fraud override<br/>confidence floor<br/>fact check<br/>rules fallback"]
+    copilot -- "classify recall request<br/>word client message<br/>split unknown address" --> claude["Claude<br/>schema-constrained output"]
+    claude --> guard["Guardrails in code<br/>fraud override<br/>confidence floor<br/>fact check · no invented text<br/>rules fallback"]
     guard --> copilot
     copilot --> proposal["Proposal<br/>repair, outreach,<br/>recall or escalate"]
     proposal --> human["Approval screen<br/>named human<br/>(maker-checker)"]

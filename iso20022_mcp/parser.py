@@ -60,6 +60,12 @@ def _party(node, tag, ns) -> dict[str, Any] | None:
         address = {k: _t(adr, tag_, ns) for k, tag_ in
                    [("strt_nm", "StrtNm"), ("bldg_nb", "BldgNb"), ("pst_cd", "PstCd"),
                     ("twn_nm", "TwnNm"), ("ctry", "Ctry")]}
+        # Only present when used, so existing structured addresses parse exactly as before.
+        for k, tag_ in [("dstrct_nm", "DstrctNm"), ("ctry_sub_dvsn", "CtrySubDvsn")]:
+            if (v := _t(adr, tag_, ns)) is not None:
+                address[k] = v
+        if lines := [l.text for l in adr.findall("n:AdrLine", {"n": ns}) if l.text]:
+            address["adr_lines"] = lines
     return {"name": _t(el, "Nm", ns), "address": address}
 
 

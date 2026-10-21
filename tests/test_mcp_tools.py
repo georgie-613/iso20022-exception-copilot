@@ -27,7 +27,9 @@ def cases(tmp_path_factory) -> Path:
 def _each(cases):
     for d in sorted(cases.iterdir()):
         if d.is_dir():
-            yield d, json.loads((d / "label.json").read_text())
+            label = json.loads((d / "label.json").read_text())
+            if label["lane"] != "C":        # Lane C cases are pre-send: no pacs.002
+                yield d, label
 
 
 # ---------- parse_message ----------

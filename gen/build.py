@@ -103,6 +103,14 @@ def build(seed: int, out: Path) -> list[str]:
         for name, data in build_case(seed, case_id, set_, lane, code, directory).items():
             (case_dir / name).write_bytes(data)
 
+    # Lane C demo cases: free-text creditor addresses to structure before sending
+    from .addresses import DEMO_ADDRESSES, build_case as build_address_case
+    for spec in DEMO_ADDRESSES:
+        (out / spec[0]).mkdir()
+        for name, data in build_address_case(seed, spec[0], "demo", spec, directory).items():
+            (out / spec[0] / name).write_bytes(data)
+        cases.append((spec[0], "demo", "C", "ADDR"))
+
     manifest = {
         "seed": seed,
         "count": len(cases),
