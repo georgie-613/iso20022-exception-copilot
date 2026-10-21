@@ -134,3 +134,29 @@ def test_draft_repair_over_mcp(cases):
             "pacs002_xml": (cases / "A-RC01-01" / "pacs002.xml").read_text()}
     r = asyncio.run(server.call_tool("draft_repair", args))
     assert r.structured_content["status"] == "DRAFT_PENDING_APPROVAL"
+
+
+# ---------- RC01: repair keying errors only (feedback from a payments ops reviewer) ----------
+
+from iso20022_mcp.triage import _keying_distance  # noqa: E402
+
+
+def test_keying_distance():
+    assert _keying_distance("PERUPEL0", "PERUPEL0") == 0
+    assert _keying_distance("PREUPEL0", "PERUPEL0") == 1   # adjacent transposition
+    assert _keying_distance("PXRUPEL0", "PERUPEL0") == 1   # one wrong letter
+    assert _keying_distance("AAGEPEC0", "PERUPEL0") > 2    # a different bank
+
+
+def test_rc01_typo_repaired_with_reason(cases):
+    p8, p2 = (cases / "A-RC01-01" / "pacs008.xml").read_bytes(), (cases / "A-RC01-01" / "pacs002.xml").read_bytes()
+    r = draft_repair(p8, p2)
+    assert r["status"] == "DRAFT_PENDING_APPROVAL"
+    assert "keying error" in r["why"] and "not in the BIC directory" in r["why"]
+
+
+def test_rc01_wrong_bank_goes_to_client_not_repaired(cases):
+    p8, p2 = (cases / "A-RC01-03" / "pacs008.xml").read_bytes(), (cases / "A-RC01-03" / "pacs002.xml").read_bytes()
+    assert explain_reject(p2, p8)["recommended_action"] == "outreach"
+    r = draft_repair(p8, p2)
+    assert r["status"] == "REFUSED" and r["route_to"] == "outreach" and "not a typo" in r["reason"]

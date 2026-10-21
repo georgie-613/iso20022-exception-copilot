@@ -50,6 +50,42 @@ def rc01(p: Payment, rng: random.Random, d: Directory) -> Mutation:
     )
 
 
+def _typo(code: str, rng: random.Random) -> str:
+    """One keying error in a 4-letter bank code: adjacent transposition or one wrong letter."""
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    i = rng.randrange(3)
+    if code[i] != code[i + 1] and rng.random() < 0.5:
+        return code[:i] + code[i + 1] + code[i] + code[i + 2:]
+    j = rng.randrange(4)
+    return code[:j] + rng.choice([c for c in letters if c != code[j]]) + code[j + 1:]
+
+
+def rc01_typo(p: Payment, rng: random.Random, d: Directory) -> Mutation:
+    """Invalid BIC from a keying error: one or two characters off a listed BIC.
+    The agent name is on the message and points to the BIC it was meant to be."""
+    true_bic = p.creditor_agent.bic
+    while True:
+        bad = _typo(true_bic[:4], rng) + true_bic[4:]
+        if bad not in d and bad != true_bic:
+            break
+    p.creditor_agent = p.creditor_agent.model_copy(update={"bic": bad})
+    return Mutation(
+        action="repair",
+        allowed_fields=["CdtrAgt.FinInstnId.BICFI"],
+        expected_value=true_bic,
+        addtl_inf="CREDITOR AGENT BIC NOT FOUND IN DIRECTORY",
+        rationale="Keying error: the BIC is one or two characters off the BIC of the bank named on the message.",
+    )
+
+
+def rc01_wrong_bank(p: Payment, rng: random.Random, d: Directory) -> Mutation:
+    """Invalid BIC that looks nothing like the named bank's BIC. More likely the client
+    picked the wrong bank than mistyped one: ask them, don't swap in a different bank."""
+    m = rc01(p, rng, d)
+    return Mutation(action="outreach", addtl_inf=m.addtl_inf,
+                    rationale="BIC is not a typo of the named bank's BIC: confirm the beneficiary bank with the client.")
+
+
 def ch16(p: Payment, rng: random.Random, d: Directory) -> Mutation:
     """Element content formally incorrect: lowercase currency fails the schema."""
     true_ccy = p.currency
@@ -163,7 +199,7 @@ def ms03(p: Payment, rng: random.Random, d: Directory) -> Mutation:
 
 
 LANE_A: dict[str, Mutator] = {
-    "RC01": rc01, "CH16": ch16, "DT01": dt01, "RR02": rr02, "RR03": rr03,
+    "RC01": rc01_typo, "CH16": ch16, "DT01": dt01, "RR02": rr02, "RR03": rr03,
     "AC01": ac01, "AC04": ac04, "BE01": be01, "AM04": am04, "AM05": am05,
     "AC06": ac06, "AG01": ag01, "RR04": rr04, "MS03": ms03,
 }

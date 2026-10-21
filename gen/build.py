@@ -17,7 +17,7 @@ from pathlib import Path
 from .base import build_payment, to_xml
 from .directory import Directory
 from .model import Label
-from .mutators import LANE_A, SCHEMA_INVALID_CODES
+from .mutators import LANE_A, SCHEMA_INVALID_CODES, rc01_wrong_bank
 from .recall import recall_request
 from .status import to_pacs002
 from .validate import validate
@@ -36,6 +36,8 @@ DEMO_PLAN: list[tuple[str, str]] = [
     ("B", "FRAD"),
 ]
 IMPLICIT_DEMO = {"DEMO-11-FRAD"}
+# One RC01 eval case is a wrong bank, not a typo: it must go to the client, not be repaired.
+WRONG_BANK = {"A-RC01-03"}
 
 
 def plan() -> list[tuple[str, str, str, str]]:
@@ -56,7 +58,8 @@ def build_case(seed: int, case_id: str, set_: str, lane: str, code: str,
     files: dict[str, bytes] = {}
 
     if lane == "A":
-        m = LANE_A[code](payment, rng, directory)
+        mutate = rc01_wrong_bank if case_id in WRONG_BANK else LANE_A[code]
+        m = mutate(payment, rng, directory)
         pacs008 = to_xml(payment)
         pacs002 = to_pacs002(payment, rng, "RJCT", code, m.addtl_inf)
         label = Label(case_id=case_id, set=set_, lane="A", code=code, action=m.action,

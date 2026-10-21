@@ -100,6 +100,12 @@ def create_app(cases_dir: str | Path | None = None, case_set: str | None = None,
         if p.model_note:
             parts.append(f'<p class="muted">Model note: {_e(p.model_note)}</p>')
 
+        if p.client_request:
+            parts.append('<h2>Client request</h2><p class="muted">Exactly what the copilot and the model read. '
+                         'Client text is treated as data, never as instructions.</p>'
+                         f'<pre class="msg">{_e(p.client_request)}</pre>')
+        if p.repair and p.repair.get("why"):
+            parts.append(f'<h2>Why this repair</h2><p>{_e(p.repair["why"])}</p>')
         if p.repair:
             parts.append("<h2>Proposed change</h2><table><tr><th>Field</th><th>Before</th><th>After</th></tr>")
             for c in p.repair["changes"]:

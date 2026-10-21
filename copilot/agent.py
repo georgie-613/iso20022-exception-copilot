@@ -54,6 +54,7 @@ class Proposal(BaseModel):
     repair: dict[str, Any] | None = None       # draft_repair output when action == repair
     outreach_message: str | None = None        # when action == outreach
     recall: dict[str, Any] | None = None       # camt.056 fields when action == recall
+    client_request: str | None = None          # Lane B: the client's text, exactly what the model read
     evidence: list[dict] | None = None
     proposed_by: str = "copilot"
     model: str = "rules-baseline"
@@ -101,6 +102,7 @@ class RulesBaseline:
 
 
 _OUTREACH_ASK = {
+    "RC01": "The beneficiary bank code (BIC) on this payment does not exist and is not a typo of the bank named. Please confirm the beneficiary's bank and its BIC with them directly.",
     "AC01": "Please confirm the beneficiary's account number with them directly (not by email from the vendor).",
     "AC04": "The beneficiary's account is closed. Please provide their new account details, confirmed by phone.",
     "BE01": "The beneficiary name does not match the account holder. Please confirm who you intended to pay.",
@@ -208,29 +210,35 @@ class Copilot:
             draft = draft_repair(p8, p2)
             if draft["status"] == "DRAFT_PENDING_APPROVAL":
                 ch = "; ".join(f"{c['field']}: {c['before']} -> {c['after']}" for c in draft["changes"])
+                why = f" Why: {draft['why']}" if draft.get("why") else ""
                 return Proposal(**base, action="repair", repair=draft,
-                                summary=f"{e['title']}. Proposed repair: {ch}")
+                                summary=f"{e['title']}. Proposed repair: {ch}.{why}")
+            if draft.get("route_to") == "outreach":
+                return self._outreach(case_id, p8, e, base, prefix=f"Repair refused: {draft['reason']}. ")
             return Proposal(**base, action="escalate",
                             summary=f"{e['title']}. Repair refused: {draft['reason']}")
 
         if action == "outreach":
-            tx = parse(p8)["transaction"]
-            ctx = {
-                "debtor": tx["debtor"]["name"], "creditor": tx["creditor"]["name"],
-                "end_to_end_id": tx["end_to_end_id"], "currency": tx["currency"],
-                "amount": tx["amount"], "title": e["title"],
-                "ask": _OUTREACH_ASK.get(e["reason_code"], "Please contact us about this payment."),
-            }
-            draft, used, error = self._call(case_id, "outreach", "write_outreach", ctx,
-                                            check=lambda o: check_outreach(o.message, ctx))
-            note = f"Model output rejected ({error}); rules template used." if error else None
-            if used is not self.fallback and draft.confidence < min_confidence():
-                return Proposal(**base, action="escalate", model_note=f"low confidence {draft.confidence:.2f}",
-                                summary=f"{e['title']}. Model unsure about the client message; a person drafts it.")
-            return Proposal(**base, action="outreach", outreach_message=draft.message, model_note=note,
-                            summary=f"{e['title']}. Client must confirm; draft message attached.")
+            return self._outreach(case_id, p8, e, base, prefix=f"{e['note']} " if e.get("note") else "")
 
         return Proposal(**base, action="escalate", summary=f"{e['title']}. {e['explanation']}")
+
+    def _outreach(self, case_id: str, p8: bytes, e: dict, base: dict, prefix: str = "") -> Proposal:
+        tx = parse(p8)["transaction"]
+        ctx = {
+            "debtor": tx["debtor"]["name"], "creditor": tx["creditor"]["name"],
+            "end_to_end_id": tx["end_to_end_id"], "currency": tx["currency"],
+            "amount": tx["amount"], "title": e["title"],
+            "ask": _OUTREACH_ASK.get(e["reason_code"], "Please contact us about this payment."),
+        }
+        draft, used, error = self._call(case_id, "outreach", "write_outreach", ctx,
+                                        check=lambda o: check_outreach(o.message, ctx))
+        note = f"Model output rejected ({error}); rules template used." if error else None
+        if used is not self.fallback and draft.confidence < min_confidence():
+            return Proposal(**base, action="escalate", model_note=f"low confidence {draft.confidence:.2f}",
+                            summary=f"{e['title']}. Model unsure about the client message; a person drafts it.")
+        return Proposal(**base, action="outreach", outreach_message=draft.message, model_note=note,
+                        summary=f"{e['title']}. {prefix}Client must confirm; draft message attached.")
 
     # ---- Lane B ----
     def _recall(self, case_id: str, p8: bytes, request: str) -> Proposal:
@@ -241,10 +249,10 @@ class Copilot:
         # Hard override: any fraud signal from any source escalates, whatever the reason says.
         if FRAUD_SIGNALS.search(request) or c.reason == "FRAD" or c.fraud_indicators:
             signals = ", ".join(c.fraud_indicators) or "fraud keyword in request"
-            return Proposal(**base, reason_code="FRAD", action="escalate", model_note=note,
+            return Proposal(**base, reason_code="FRAD", action="escalate", model_note=note, client_request=request.strip() or None,
                             summary=f"Possible fraud ({signals}). Route to fraud operations now; no recall drafted.")
         if used is not self.fallback and c.confidence < min_confidence():
-            return Proposal(**base, reason_code=c.reason, action="escalate",
+            return Proposal(**base, reason_code=c.reason, action="escalate", client_request=request.strip() or None,
                             model_note=f"low confidence {c.confidence:.2f}",
                             summary=f"Recall reason unclear (model {c.confidence:.2f} on {c.reason}). A person decides.")
 
@@ -260,4 +268,5 @@ class Copilot:
             "cancellation_reason": c.reason,
         }
         return Proposal(**base, reason_code=c.reason, action="recall", recall=recall, model_note=note,
+                        client_request=request.strip() or None,
                         summary=f"Client requests recall ({c.reason}). camt.056 drafted for approval.")

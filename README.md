@@ -54,12 +54,14 @@ The copilot may only draft **formatting or enrichment** fixes from data the bank
 
 | Action | When | Examples |
 |---|---|---|
-| `repair` | Intended value is unambiguous or in our own master data | RC01 (BIC recoverable from directory), CH16, DT01, RR02 (debtor address from KYC master) |
+| `repair` | Intended value is unambiguous or in our own master data | RC01 (a keying error: 1–2 characters off the BIC of the bank named on the message, same country), CH16, DT01, RR02 (debtor address from KYC master) |
 | `outreach` | Only the client knows the truth — never guess | AC01, AC04, BE01, RR03, AM04 |
 | `escalate` | Compliance, fraud, unspecified or judgment calls — always human | RR04, MS03, AC06, AG01, AM05, FRAD |
 | `recall` | Client-requested recall, drafted for approval | DUPL, CUST, TECH |
 
 AC01 is deliberately `outreach` even when a digit transposition looks obvious: guessing an account number is how money goes to the wrong person.
+
+The same rule applies to bank codes. An RC01 is repaired only when the bad BIC is a keying error of the bank named on the message; a BIC that looks nothing like it means the client probably picked the wrong bank, so the copilot asks instead of swapping in a different bank. Every repair says why on the approval screen.
 
 ## The case set
 

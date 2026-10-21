@@ -101,3 +101,10 @@ def test_audit_page(client):
     c, _ = client
     r = c.get("/audit")
     assert r.status_code == 200 and "Hash chain: verified" in r.text
+
+
+def test_case_page_shows_client_request_and_repair_reason(client):
+    c, _ = client
+    fraud = c.get("/case/DEMO-11-FRAD").text
+    assert "Client request" in fraud and "new mobile number" in fraud
+    assert "Why this repair" in c.get("/case/DEMO-01-RC01").text
