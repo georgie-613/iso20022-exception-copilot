@@ -43,7 +43,7 @@ Set `ANTHROPIC_API_KEY` first to run Claude; without it the deterministic rules 
 | Demo polish: diagram, quickstart, 3-case demo story | ✅ PR 9 |
 | LLM layer: Claude for recall classification + outreach wording, with fallback and audit | ✅ PR 7 · live: implicit fraud missed 4/5 → 0/5, all gates green |
 | Held-out case set (18 cases the rules never saw) | ✅ Day 5 |
-| Lane C: CBPR+ address structuring (country rules + model fallback + `structure_address` tool) | ✅ rules: 21/22 correct, 0 unsafe · held-out 7/12, 0 unsafe · live model run pending |
+| Lane C: CBPR+ address structuring (country rules + model fallback + `structure_address` tool) | ✅ live: held-out 7/12 → 10/12 correct with Claude, 0 unsafe, all gates green |
 
 ## Scope (v1)
 
@@ -268,14 +268,19 @@ python -m evals.address --cases cases_address --set address                 # CI
 4. **The same checks run on the rules' draft and the model's:** every value must appear in the original address (no invented, expanded or translated text), the result must be valid CBPR+, the postcode must match the country's format, the country must match the evidence, the drafted message must still pass the XSD and only the creditor address may change. A failed check means a person decides. The blocked output is logged.
 5. A named person approves the draft on the same approval screen, with the field-by-field diff and the reason.
 
-**Results (rules baseline; `rules` never calls a model):**
+**Live results** (`claude-sonnet-5-5`, run 4 on 2026-10-21, [full report](evals/results/live-eval-2026-10-21-run-39604108791.md), published as-is). All hard gates pass, with no failed model calls:
 
-| Set | Correct drafts | Unsafe (wrong town/country, or drafted when a person must decide) | Sent to a person |
+| Set | Correct drafts: rules → with Claude | Unsafe | Sent to a person |
 |---|---|---|---|
-| Address set (24) | 21 of 22 | **0** | 3 (no Peru rules; country conflict; no town) |
-| Held-out (13, hand-written) | 7 of 12 | **0** | 6 (postcode after town, abbreviated "Cra.", Chile, Peru, Costa Rica directions, conflict) |
+| Address set (24) | 21 → **22 of 22** | 0 → **0** | 3 → 2 (conflict; no town) |
+| Held-out (13, hand-written) | 7 → **10 of 12** | 0 → **0** | 6 → 2 (conflict; Costa Rica) |
 
-The held-out cases use formats the rules weren't written for: reordered lines, abbreviations, umlauts, a missing country line, and Costa Rica's directions-style addresses ("Del Parque Central de Heredia 300 metros sur"). They were written by the same author as the rules, so treat them as a stress test, not an independent benchmark. The model's numbers come from the `live-eval` workflow; until a run is published here, this lane is a rules result only.
+Unsafe means a draft with the wrong town or country, or a draft where a person must decide. Claude structured Chile, Peru and a Mexican address with the postcode after the town, all of which the rules sent to a person. What it got wrong, published as-is:
+- *H-C-CO-ABBR*: building number drafted as `# 71-21` instead of `71-21`. The text is in the original, so the invented-text check doesn't catch it; town and country are right. A person would fix it at approval.
+- *H-C-CR-SENAS* (Costa Rica, "Del Parque Central de Heredia 300 metros sur"): the model's draft was **blocked** because the town "Heredia" also appears inside the directions line. CBPR+ forbids repeating structured data in address lines, but this is a landmark name, not a repeat, so the check is stricter than the rule. Safe direction, still a person. Not changed after seeing the held-out set; a fix would get a held-out v2.
+- *C-NO-TOWN*: the model's draft was **blocked** (no town). The guardrail did its job.
+
+The held-out cases use formats the rules weren't written for: reordered lines, abbreviations, umlauts, a missing country line, and Costa Rica's directions-style addresses. They were written by the same author as the rules, so treat them as a stress test, not an independent benchmark.
 
 ## Develop
 
