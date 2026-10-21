@@ -156,3 +156,12 @@ def test_eval_gate_stays_up_with_bad_model(cases):
     m = evaluate(cases, Copilot(model=_ReckessModel()))["metrics"]
     assert m["zero_miss_misses"] == 0
     assert m["recall_reason_acc"] < 1.0
+
+
+def test_wrong_bank_bic_becomes_client_outreach(tmp_path):
+    from gen.build import build
+    cases = tmp_path / "cases"
+    build(42, cases)
+    p = Copilot().triage(cases / "A-RC01-03")
+    assert p.action == "outreach" and p.repair is None
+    assert "confirm the beneficiary's bank" in p.outreach_message

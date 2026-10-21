@@ -76,6 +76,15 @@ def explain_reject(pacs002_xml: str | bytes, pacs008_xml: str | bytes | None = N
         action, note = "escalate", "Policy allows a repair, but the defect is not visible in the original message. Escalated."
     elif action == "repair" and evidence is None:
         note = "Provide the original pacs.008 to confirm the defect before drafting a repair."
+    elif action == "repair":
+        # Dry-run the repair: if it would be refused (wrong bank, unknown debtor, ...),
+        # say so now and route where draft_repair would.
+        raw = pacs008_xml.encode() if isinstance(pacs008_xml, str) else pacs008_xml
+        root, _, _ = load(raw)
+        try:
+            _FIXERS[code](root, _ns(root))
+        except Refuse as e:
+            action, note = e.route_to, f"Not repairable: {e}."
 
     out.update(
         reason_code=code,
@@ -94,7 +103,28 @@ def explain_reject(pacs002_xml: str | bytes, pacs008_xml: str | bytes | None = N
 # ---------- repairs: one per repairable code ----------
 
 class Refuse(Exception):
-    pass
+    def __init__(self, reason: str, route_to: str = "escalate") -> None:
+        super().__init__(reason)
+        self.route_to = route_to
+
+
+def _keying_distance(a: str, b: str) -> int:
+    """Edits (substitution, insertion, deletion, adjacent transposition) between two codes."""
+    d = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
+    for i in range(len(a) + 1):
+        d[i][0] = i
+    for j in range(len(b) + 1):
+        d[0][j] = j
+    for i in range(1, len(a) + 1):
+        for j in range(1, len(b) + 1):
+            cost = a[i - 1] != b[j - 1]
+            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[-1][-1]
+
+
+MAX_BIC_TYPO = 2
 
 
 def _fix_rc01(root, ns):
@@ -105,7 +135,21 @@ def _fix_rc01(root, ns):
     match = bic_directory().find_by_name(name)
     if not match:
         raise Refuse(f"no directory entry for agent name '{name}'")
+    bad = fin.findtext("n:BICFI", namespaces=ns) or ""
+    # A name match alone isn't enough: swapping in a completely different BIC means
+    # guessing the client meant another bank. Only a keying error in the same country
+    # is repaired; anything else goes back to the client.
+    if bad[4:6] != match["bic"][4:6]:
+        raise Refuse(f"BIC {bad} is for a different country than {name} ({match['bic']}); "
+                     "confirm the beneficiary bank with the client", route_to="outreach")
+    dist = _keying_distance(bad[:8], match["bic"][:8])
+    if dist > MAX_BIC_TYPO:
+        raise Refuse(f"BIC {bad} differs from {name}'s BIC {match['bic']} by {dist} characters: "
+                     "not a typo; confirm the beneficiary bank with the client", route_to="outreach")
     fin.find("n:BICFI", ns).text = match["bic"]
+    return (f"{bad} is not in the BIC directory. The agent name on the message, {name}, matches "
+            f"{match['bic']}, which differs by {dist} character{'s' if dist > 1 else ''} in the same "
+            "country: a keying error.")
 
 
 def _fix_ch16(root, ns):
@@ -169,16 +213,16 @@ def draft_repair(pacs008_xml: str | bytes, pacs002_xml: str | bytes) -> dict[str
     code = explained.get("reason_code")
     if explained["recommended_action"] != "repair":
         return {"status": "REFUSED", "reason_code": code,
-                "reason": f"policy action is '{explained['recommended_action']}', not repair",
+                "reason": explained.get("note") or f"policy action is '{explained['recommended_action']}', not repair",
                 "route_to": explained["recommended_action"]}
 
     raw = pacs008_xml.encode() if isinstance(pacs008_xml, str) else pacs008_xml
     root, _, _ = load(raw)
     ns = _ns(root)
     try:
-        _FIXERS[code](root, ns)
+        why = _FIXERS[code](root, ns)
     except Refuse as e:
-        return {"status": "REFUSED", "reason_code": code, "reason": str(e), "route_to": "escalate"}
+        return {"status": "REFUSED", "reason_code": code, "reason": str(e), "route_to": e.route_to}
 
     repaired = etree.tostring(root, pretty_print=True, xml_declaration=True, encoding="UTF-8")
     allowed = policy_for(code).allowed_fields
@@ -203,6 +247,7 @@ def draft_repair(pacs008_xml: str | bytes, pacs002_xml: str | bytes) -> dict[str
         "changes": changes,
         "repaired_xml": repaired.decode(),
         "post_repair_validation": check,
+        "why": why,
         "requires_human_approval": True,
         "note": "Draft only. Nothing has been sent. Resubmission IDs are assigned at release.",
     }

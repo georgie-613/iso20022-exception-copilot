@@ -105,7 +105,10 @@ def test_rc01_bic_is_unlisted_and_recoverable(cases):
         bad = cdtr_agt.split("<BICFI>")[1].split("</BICFI>")[0]
         name = cdtr_agt.split("<Nm>")[1].split("</Nm>")[0]
         assert bad not in d
-        assert d.find_by_name(name)["bic"] == l.expected_value
+        if l.action == "repair":     # keying error: recoverable from the named bank
+            assert d.find_by_name(name)["bic"] == l.expected_value
+        else:                        # wrong bank: deliberately not a typo
+            assert l.action == "outreach"
 
 
 def test_rr02_expected_address_from_master(cases):
